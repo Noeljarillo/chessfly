@@ -3,6 +3,8 @@
 Engineering plan for training the FlyWire *Drosophila melanogaster* connectome
 (139,255 neurons, ~54.5M synapses) to play chess — plus a playable 3D harness.
 
+**▶ Play it: https://noeljarillo.github.io/chessfly/**
+
 **Verdict up front: 3600 Elo is unreachable.** Short by ~151× in parameter
 capacity, and by a second, independent gap (search) that capacity cannot close.
 Realistic ceiling: **1,500–1,900 Elo**. Full derivation in [`PLAN.md`](PLAN.md) §2.
