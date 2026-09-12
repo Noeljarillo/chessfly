@@ -1376,6 +1376,7 @@ let state = newState();
 let selected = null, selMoves = [], depth = 2, busy = false, over = false;
 let history = [];                                  // {san, color}
 let anim = null, lastSim = null, lastDN = null, playT = T_STEPS - 1, playing = false;
+let flyThinking = false;          // hard guard: only ever one fly reply in flight
 
 const $ = id => document.getElementById(id);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1457,11 +1458,12 @@ function pick(e){
 
 function animateMove(m, done){
   const obj = pieceObjs.get(m.from);
-  if(!obj){ done(); return; }
+  // Single early-exit. done() must be invoked exactly once, on exactly one path.
+  if(!obj || reduceMotion){ done(); return; }
   const a = sqToWorld(m.from), b = sqToWorld(m.to);
-  const hop = state.b[m.from] && state.b[m.from].toLowerCase() === 'n' ? .75 : .18;
-  if(reduceMotion){ done(); return; }
-  anim = {obj, a, b, hop, t:0, dur:270, done};
+  // the move is already applied, so the piece now sits on m.to
+  const hop = state.b[m.to] && state.b[m.to].toLowerCase() === 'n' ? .75 : .18;
+  anim = {obj, a, b, hop, t0:performance.now(), dur:270, done};
 }
 
 function playMove(m, byHuman){
@@ -1476,18 +1478,14 @@ function playMove(m, byHuman){
     renderLog(); refreshEval();
     busy = false;
     if(checkEnd()) return;
-    if(!byHuman){ setVerdict('White to move — click a piece.'); return; }
-    flyTurn();
+    if(byHuman) flyTurn();
+    else setVerdict('White to move — click a piece.');
   });
-  if(reduceMotion){
-    rebuildPieces(state); showLast(m); renderLog(); refreshEval(); busy = false;
-    if(checkEnd()) return;
-    if(!byHuman) setVerdict('White to move — click a piece.'); else flyTurn();
-  }
 }
 
 function flyTurn(){
-  if(over) return;
+  if(over || flyThinking) return;
+  flyThinking = true;
   busy = true;
   setVerdict('Fly thinking — 96 timesteps, 48 ms simulated…');
   $('scopeState').textContent = 'running';
@@ -1507,8 +1505,8 @@ function flyTurn(){
     $('scopeState').textContent = 'settled';
     $('rDn').textContent = res ? sqName(res.move.from) + '→' + sqName(res.move.to) : '—';
     redrawScope();
-    if(!res){ busy = false; checkEnd(); return; }
-    busy = false;
+    flyThinking = false; busy = false;
+    if(!res){ checkEnd(); return; }
     playMove(res.move, false);
   })();
 }
@@ -1523,7 +1521,7 @@ $('ladder').addEventListener('click', e => {
 $('bNew').addEventListener('click', () => reset());
 $('bFlip').addEventListener('click', () => { flipped = !flipped; });
 $('bUndo').addEventListener('click', () => {
-  if(busy || history.length < 2) return;
+  if(busy || flyThinking || history.length < 2) return;
   // replay from the start, minus the last full move pair
   const saved = history.slice(0, history.length - 2);
   state = newState(); history = []; over = false;
@@ -1549,7 +1547,7 @@ function restingScope(){
 }
 
 function reset(){
-  state = newState(); history = []; over = false; busy = false;
+  state = newState(); history = []; over = false; busy = false; flyThinking = false; anim = null;
   selected = null; selMoves = []; lastSim = null; lastDN = null; playT = T_STEPS - 1;
   rebuildPieces(state); showMarks(null, []); showLast(null);
   renderLog(); refreshEval(); restingScope();
@@ -1576,8 +1574,8 @@ function tick(){
   orbit.dist += (orbit.tDist - orbit.dist) * .12;
   applyCam();
   if(anim){
-    anim.t += 16.7;
-    const e = Math.min(1, anim.t / anim.dur), s = e < .5 ? 2*e*e : 1 - 2*(1-e)*(1-e);
+    const e = Math.min(1, (performance.now() - anim.t0) / anim.dur);
+    const s = e < .5 ? 2*e*e : 1 - 2*(1-e)*(1-e);
     anim.obj.position.lerpVectors(anim.a, anim.b, s);
     anim.obj.position.y = Math.sin(s * Math.PI) * anim.hop;
     if(e >= 1){ const d = anim.done; anim = null; d(); }
