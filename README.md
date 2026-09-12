@@ -26,6 +26,14 @@ Self-contained demo — no build step, open it directly.
 - Hand-written 0x88 move generator; **perft verified to depth 4** (20 / 400 / 8902 / 197281)
 - Brain panel: 39-neuropil LIF surrogate, 96 timesteps, with spike raster,
   neuropil activity graph, and factored descending-neuron move readout
+- Anatomical plate over the board: the same 39 neuropils drawn on a frontal
+  schematic of the fly brain — optic-lobe stack, mushroom body, central complex,
+  GNG — lit by live per-region rate and with spikes riding the tracts
+- The fly is an animal, not a cursor: head with compound eyes, banded abdomen,
+  beating wings and six jointed legs. It flies in from its perch, closes its
+  legs around the piece, carries it, sets it down and leaves
+- Deliberation playback is independent of `prefers-reduced-motion`: reduced
+  motion steps the trial instead of sweeping it, and never skips it
 
 The opponent ladder is the §8 milestone table: M3 ≈ 1200, M4 ≈ 1500, M6 ≈ 1800.
 Stockfish-max is listed and disabled, annotated with its capacity shortfall.

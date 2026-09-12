@@ -87,6 +87,45 @@ button{font:inherit; color:inherit; background:none; border:none; cursor:pointer
 #verdict{color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 #verdict.win{color:var(--sage)} #verdict.lose{color:var(--eye)}
 
+/* anatomical brain plate, floated over the specimen stage */
+.brainlay{
+  position:absolute; left:14px; top:14px; width:min(36%,340px); min-width:200px;
+  background:rgba(9,12,17,.74); border:1px solid var(--rule);
+  backdrop-filter:blur(7px); z-index:5; pointer-events:none;
+  transition:border-color .35s, box-shadow .35s;
+}
+.brainlay.run{border-color:#6B5520; box-shadow:0 0 0 1px rgba(217,164,65,.16), 0 6px 26px rgba(0,0,0,.5)}
+.brainlay canvas{display:block; width:100%}
+.bl-head{
+  display:flex; align-items:baseline; gap:8px; padding:6px 6px 5px 10px;
+  border-bottom:1px solid var(--rule); font-family:var(--mono); font-size:9px; letter-spacing:.15em;
+}
+.bl-head b{color:var(--cuticle); font-weight:600; text-transform:uppercase; white-space:nowrap}
+.bl-head i{font-style:normal; color:var(--faint); letter-spacing:.04em; flex:1; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.bl-head button{pointer-events:auto; color:var(--faint); font-family:var(--mono);
+  font-size:12px; line-height:1; padding:2px 5px; flex:none}
+.bl-head button:hover{color:var(--cuticle)}
+.bl-foot{
+  display:flex; justify-content:space-between; gap:8px; padding:5px 10px;
+  border-top:1px solid var(--rule); font-family:var(--mono); font-size:9.5px;
+}
+.bl-foot #blState{color:var(--dim); letter-spacing:.12em; text-transform:uppercase}
+.bl-foot #blT{color:var(--cuticle); font-variant-numeric:tabular-nums}
+.brainlay.min canvas,.brainlay.min .bl-foot{display:none}
+
+/* deliberation pacing — the escape hatch for hosts that force reduced motion */
+.motionrow{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:7px 8px; border-top:1px solid var(--rule);
+  font-family:var(--mono); font-size:9.5px; color:var(--faint);
+}
+.motionrow button{
+  border:1px solid var(--rule-2); padding:3px 8px; font-family:var(--mono);
+  font-size:9px; letter-spacing:.1em; color:var(--dim); background:var(--panel); white-space:nowrap;
+}
+.motionrow button:hover{border-color:var(--cuticle); color:var(--cuticle)}
+
 /* instrument stack */
 .stack{
   border-left:1px solid var(--rule); background:var(--panel);
@@ -216,6 +255,7 @@ td.wrap,th.wrap{white-space:normal; min-width:150px}
   .toc{display:none}
 }
 @media (max-width:900px){
+  .brainlay{width:min(46%,260px); min-width:170px}
   .view.on#vPlay{height:auto; display:block}
   .stage{grid-template-columns:minmax(0,1fr)}
   .board-cell{height:min(66vh,520px)}
@@ -250,6 +290,16 @@ td.wrap,th.wrap{white-space:normal; min-width:150px}
   <div class="stage">
     <div class="board-cell">
       <canvas id="gl"></canvas>
+
+      <div class="brainlay" id="brainLay">
+        <div class="bl-head">
+          <b>Central brain</b><i>39 neuropils · frontal schematic</i>
+          <button id="bBrainTog" aria-expanded="true" title="Collapse the brain plate">–</button>
+        </div>
+        <canvas id="cBrain" aria-label="Frontal neuropil map with live activity"></canvas>
+        <div class="bl-foot"><span id="blState">resting</span><span id="blT">0.0 ms</span></div>
+      </div>
+
       <div class="hud">
         <span class="who"><i class="dot w"></i>YOU</span>
         <span class="who"><i class="dot f"></i>FLY</span>
@@ -282,6 +332,10 @@ td.wrap,th.wrap{white-space:normal; min-width:150px}
             <div><b>RATE Hz</b><u id="rHz">0.0</u></div>
             <div><b>SPIKES</b><u id="rSp">0</u></div>
             <div><b>DN ARGMAX</b><u id="rDn">—</u></div>
+          </div>
+          <div class="motionrow">
+            <span>Deliberation</span>
+            <button id="bMotion" title="How the 96-step trial is played back">AUTO</button>
           </div>
         </div>
       </div>
@@ -924,6 +978,10 @@ addEdge('ME_L','LO_R',.12);  addEdge('ME_R','LO_L',.12);
 const T_STEPS = 96, U_PER = 16, N_UNITS = REG.length * U_PER;
 const INBOUND = REG.map(() => []);
 for(const e of EDGES) INBOUND[e.t].push(e);
+/* afferent weight sum per region: input enters as a weighted MEAN of upstream
+   rates, so a deep neuropil with one strong input is not starved relative to
+   a shallow one with five. Without this the cascade dies three hops in. */
+const WSUM = INBOUND.map(l => l.reduce((a, e) => a + e.w, 0) || 1);
 
 // per-unit fixed random projection of the 768-plane board onto ME units
 const PROJ = [];
@@ -933,7 +991,12 @@ const PROJ = [];
     const picks = []; for(let k = 0; k < 42; k++) picks.push((rnd() * 768) | 0);
     PROJ.push(picks);
   }
-  for(const r of REG){ r.bias = .04 + rnd() * .05; r.off = []; for(let u = 0; u < U_PER; u++) r.off.push((rnd() - .5) * .5); }
+  for(const r of REG){
+    r.bias = .50 + rnd() * .16;
+    /* descending neurons integrate slowly — the move commits late in the trial */
+    r.tau = r.g === 'mo' ? .055 : r.g === 'pm' ? .085 : .135;
+    r.off = []; for(let u = 0; u < U_PER; u++) r.off.push((rnd() - .5) * .5);
+  }
 })();
 
 function encodeBoard(st){
@@ -959,44 +1022,64 @@ function simulate(st){
   const rate = Array.from({length:R}, () => new Float32Array(T_STEPS));
   const raster = Array.from({length:T_STEPS}, () => []);
   const vm = new Float32Array(N_UNITS), refr = new Int8Array(N_UNITS);
+  /* stagger the membranes: identical initial conditions make a population of
+     identically-driven LIF units fire in lockstep, which is not a rate code */
+  for(let i = 0; i < N_UNITS; i++) vm[i] = Math.random() * .30;
   let total = 0;
   const meDrive = [];
   for(let side = 0; side < 2; side++)
     for(let u = 0; u < U_PER; u++){
       let acc = 0; for(const p of PROJ[side * U_PER + u]) acc += v[p];
-      meDrive.push(.20 + acc / 14);
+      meDrive.push(.24 + acc / 11);
     }
   const alSignal = .30 + .50 * (flags[1] + flags[2] + flags[3] + flags[4]) / 4 + .22 * flags[5];
-  const drive = new Float32Array(R);
+  const drive = new Float32Array(R), sens = new Float32Array(R);
   for(let r = 0; r < R; r++){
     const lab = REG[r].lab;
     drive[r] = REG[r].bias;
-    if(lab === 'LA') drive[r] += .90;
-    if(lab === 'AL') drive[r] += alSignal;
-    if(REG[r].g === 'sp') drive[r] += .10 * flags[6];
-    if(lab === 'PB') drive[r] += (.30 + .35 * flags[0]) * .4;
+    if(lab === 'LA') sens[r] = 1.90;              // photoreceptor input, sustained
+    if(lab === 'AL') sens[r] = .55 + alSignal * .55;
+    if(REG[r].g === 'sp') drive[r] += .22 + .18 * flags[6];
+    if(REG[r].g === 'cx') drive[r] += .34;
+    if(REG[r].g === 'mb') drive[r] += .30;        // KC population is large and sparse
+    if(lab === 'PB') drive[r] += .22 + .30 * flags[0];
+    if(REG[r].g === 'pm') drive[r] += .50;        // premotor LAL / GNG
+    if(lab === 'DN') drive[r] += .78;             // descending, slow integrator
   }
-  const TAU = .14, THR = 1.0, LEAK = 1 - TAU;
+  /* LIF with divisive normalisation: the optic lobe's gain control is what
+     keeps a feed-forward chain this deep from either dying or saturating. */
+  const THR = 1.0, GAIN = 5.7, NORM = 2.4;
   const prev = new Float32Array(R), cur = new Float32Array(R);
+  let pop = 0, inh = 0;
   for(let t = 0; t < T_STEPS; t++){
+    inh += (pop - inh) * .10;                     // pooled inhibition, slow pool
+    const gate = NORM * inh;
+    /* the stimulus arrives at the retina, not everywhere at once: ramping the
+       photoreceptor drive is what makes the cascade legible as a wave */
+    const onset = Math.min(1, (t + 1) / 11);
     for(let r = 0; r < R; r++){
-      let I = drive[r];
-      for(const e of INBOUND[r]) I += e.w * prev[e.s] * 2.5;
-      I += prev[r] * .30;
-      if(t < 4 && REG[r].lab === 'LA') I += 1.3;
+      const tau = REG[r].tau;
+      let acc = 0;
+      for(const e of INBOUND[r]) acc += e.w * prev[e.s];
+      let I = drive[r] + sens[r] * onset - gate + GAIN * acc / (.55 + .45 * WSUM[r]);
+      I += prev[r] * 1.20;                        // local recurrence
       const meBase = REG[r].lab === 'ME' ? (REG[r].id.endsWith('_L') ? 0 : U_PER) : -1;
       let fired = 0;
       for(let u = 0; u < U_PER; u++){
         const gi = r * U_PER + u;
         if(refr[gi] > 0){ refr[gi]--; continue; }
-        const extra = meBase >= 0 ? meDrive[meBase + u] * .85 : 0;
-        vm[gi] = vm[gi] * LEAK + (I + extra + REG[r].off[u] * .22 + (Math.random() - .5) * .20) * TAU;
-        if(vm[gi] >= THR){ vm[gi] = 0; refr[gi] = 4; fired++; raster[t].push(gi); total++; }
+        const extra = meBase >= 0 ? meDrive[meBase + u] * 1.35 * onset : 0;
+        vm[gi] += (I + extra + REG[r].off[u] * 1.10 + (Math.random() - .5) * .45 - vm[gi]) * tau;
+        if(vm[gi] < -.4) vm[gi] = -.4;
+        if(vm[gi] >= THR){ vm[gi] = 0; refr[gi] = 2 + (Math.random() < .45 ? 1 : 0);
+                           fired++; raster[t].push(gi); total++; }
       }
       cur[r] = fired / U_PER;
       rate[r][t] = cur[r];
     }
     prev.set(cur);
+    pop = 0; for(let r = 0; r < R; r++) pop += cur[r];
+    pop /= R;
   }
   return {rate, raster, total};
 }
@@ -1024,17 +1107,18 @@ function dnReadout(sim, move, legal){
    3 · SCOPE RENDERING
    ════════════════════════════════════════════════════════════════════ */
 const HEAT = [[0,[19,24,31]],[.30,[96,26,20]],[.55,[224,57,44]],[.80,[217,164,65]],[1,[255,244,224]]];
-function heat(a){
+function heatArr(a){
   a = a < 0 ? 0 : a > 1 ? 1 : a;
   for(let i = 1; i < HEAT.length; i++){
     if(a <= HEAT[i][0]){
       const [p0, c0] = HEAT[i-1], [p1, c1] = HEAT[i];
       const f = (a - p0) / (p1 - p0);
-      return `rgb(${Math.round(c0[0]+(c1[0]-c0[0])*f)},${Math.round(c0[1]+(c1[1]-c0[1])*f)},${Math.round(c0[2]+(c1[2]-c0[2])*f)})`;
+      return [c0[0]+(c1[0]-c0[0])*f, c0[1]+(c1[1]-c0[1])*f, c0[2]+(c1[2]-c0[2])*f];
     }
   }
-  return 'rgb(255,244,224)';
+  return [255, 244, 224];
 }
+function heat(a){ const c = heatArr(a); return `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`; }
 function fitCanvas(cv, cssH){
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = cv.parentElement.clientWidth;
@@ -1058,7 +1142,7 @@ function drawGraph(sim, upto){
     if(!sim) return 0;
     let a = 0, n = 0;
     for(let t = Math.max(0, upto - 10); t <= upto; t++){ a += sim.rate[i][t]; n++; }
-    return Math.min(1, (a / Math.max(1, n)) * 1.9);
+    return Math.min(1, (a / Math.max(1, n)) * 3.2);
   });
   c.lineWidth = 1;
   for(const e of EDGES){
@@ -1143,6 +1227,243 @@ function drawDN(dn, reveal){
     c.fillText("abcdefgh"[best % 8] + (8 - ((best / 8) | 0)), L + best * bw - 3, y0 + rowH + 8);
     c.font = '6.5px "IBM Plex Mono", monospace';
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   3b · ANATOMICAL ATLAS — frontal view of the Drosophila brain
+   Neuropil outlines laid out on the standard-brain frontal projection:
+   optic lobes lateral as a layered stack, central complex on the midline,
+   mushroom body hooking anteriorly, GNG ventral. Fixed 1000 x 585 space.
+   ════════════════════════════════════════════════════════════════════ */
+const AT_W = 1000, AT_H = 585, RAD = Math.PI / 180;
+
+function pBlob(pts){                       // closed Catmull-Rom → Bezier
+  const p = new Path2D(), n = pts.length, P = i => pts[((i % n) + n) % n];
+  p.moveTo(P(0)[0], P(0)[1]);
+  for(let i = 0; i < n; i++){
+    const a = P(i-1), b = P(i), c = P(i+1), d = P(i+2);
+    p.bezierCurveTo(b[0] + (c[0]-a[0])/6, b[1] + (c[1]-a[1])/6,
+                    c[0] - (d[0]-b[0])/6, c[1] - (d[1]-b[1])/6, c[0], c[1]);
+  }
+  p.closePath(); return p;
+}
+function pEll(x, y, rx, ry, rot){ const p = new Path2D(); p.ellipse(x, y, rx, ry, (rot||0)*RAD, 0, 6.2832); return p; }
+function pRing(x, y, rO, rI){
+  const p = new Path2D(); p.arc(x, y, rO, 0, 6.2832); p.arc(x, y, rI, 6.2832, 0, true); return p;
+}
+/** curved slab — every optic-lobe layer, the bridge and the fan-shaped body */
+function pShell(cx, cy, rO, rI, a0, a1){
+  const p = new Path2D();
+  p.arc(cx, cy, rO, a0*RAD, a1*RAD); p.arc(cx, cy, rI, a1*RAD, a0*RAD, true);
+  p.closePath(); return p;
+}
+/** rounded capsule — mushroom-body peduncle and lobes */
+function pBar(x0, y0, x1, y1, w){
+  const p = new Path2D(), r = w/2, dx = x1-x0, dy = y1-y0, L = Math.hypot(dx,dy) || 1;
+  const nx = -dy/L*r, ny = dx/L*r, ang = Math.atan2(ny, nx);
+  p.moveTo(x0+nx, y0+ny); p.lineTo(x1+nx, y1+ny);
+  p.arc(x1, y1, r, ang, ang - Math.PI, true);
+  p.lineTo(x0-nx, y0-ny);
+  p.arc(x0, y0, r, ang + Math.PI, ang, true);
+  p.closePath(); return p;
+}
+function pUnion(){ const p = new Path2D(); for(const q of arguments) p.addPath(q); return p; }
+
+const OC = [352, 292];                     // shared centre of curvature, optic lobe
+const AT = {
+  /* optic lobe — nested layers, lateral → medial */
+  LA :{c:[64, 292],  l:[40, 196], z:1, t:[52,160,172], s:() => pShell(OC[0], OC[1], 302, 274, 142, 218)},
+  ME :{c:[116, 292], z:2, t:[38,138,152], stri:[216, 240, 260],
+                          s:() => pShell(OC[0], OC[1], 272, 194, 138, 222)},
+  LO :{c:[182, 292], z:3, t:[26,104,124], s:() => pShell(OC[0], OC[1], 192, 124, 148, 212)},
+  LOP:{c:[252, 262], l:[246, 194], z:4, t:[56,158,142], s:() => pEll(252, 262, 36, 80, 10)},
+
+  /* ventrolateral + lateral-horn belt */
+  PLP :{c:[284, 226], l:[296, 240], z:4, s:() => pBlob([[242,192],[294,180],[324,220],[316,270],[276,284],[238,250]])},
+  PVLP:{c:[284, 318], z:4, s:() => pBlob([[238,282],[296,272],[326,314],[314,358],[270,368],[234,330]])},
+  AVLP:{c:[292, 404], z:4, s:() => pBlob([[246,356],[302,348],[336,394],[322,446],[278,454],[242,406]])},
+  LH  :{c:[292, 162], z:4, t:[142,176,118], s:() => pBlob([[256,134],[302,120],[332,150],[324,192],[284,200],[254,172]])},
+
+  /* superior protocerebrum */
+  SLP:{c:[366, 118], z:5, s:() => pBlob([[308,106],[346,76],[398,78],[422,108],[406,152],[350,160],[314,140]])},
+  SMP:{c:[452,  90], z:5, s:() => pBlob([[400,82],[432,58],[478,54],[500,78],[494,110],[446,122],[408,110]])},
+  SIP:{c:[432, 164], z:5, s:() => pBlob([[402,150],[436,136],[464,154],[460,184],[426,192],[402,176]])},
+
+  CRE:{c:[476, 292], z:6, s:() => pBlob([[442,270],[478,260],[504,282],[498,314],[464,320],[440,302]])},
+  /* mushroom body — calyx, peduncle, vertical (α/α′) and medial (β/γ) lobes */
+  MB :{c:[386, 268], l:[338, 286], z:7, s:() => pUnion(
+        pEll(350, 214, 35, 30, -14), pBar(356, 228, 400, 300, 21),
+        pBar(402, 302, 410, 168, 27), pBar(398, 310, 468, 320, 27))},
+
+  LAL:{c:[410, 372], z:6, s:() => pBlob([[372,346],[412,336],[448,360],[442,400],[400,410],[368,384]])},
+  BU :{c:[448, 348], z:8, s:() => pEll(448, 348, 19, 16, -18)},
+  AL :{c:[430, 446], z:10, t:[96,168,102], s:() => pEll(430, 446, 48, 43, -6)},
+
+  /* midline — drawn once, never mirrored */
+  PB :{c:[500, 172], z:2,  mid:1, s:() => pShell(500, 434, 270, 244, 250, 290)},
+  FB :{c:[500, 244], z:8,  mid:1, s:() => pShell(500, 476, 266, 194, 248, 292)},
+  EB :{c:[500, 330], z:9,  mid:1, s:() => pRing(500, 330, 45, 21)},
+  NO :{c:[500, 388], l:[500, 404], z:9, mid:1, s:() => pUnion(pEll(474, 386, 16, 14, 14), pEll(526, 386, 16, 14, -14))},
+  GNG:{c:[500, 492], z:9,  mid:1, s:() => pBlob([[368,458],[430,432],[500,424],[570,432],[632,458],[642,506],[588,548],[500,560],[412,548],[358,506]])},
+  DN :{c:[500, 566], z:11, mid:1, s:() => pBlob([[466,538],[534,538],[527,585],[473,585]])}
+};
+
+/* group tints — the conventional neuropil colouring of the standard atlas */
+const GTINT = {op:[46,150,162], v2:[74,124,186], ol:[118,172,112], mb:[186,110,180],
+               sp:[104,132,206], cx:[222,168,68], pm:[204,120,62], mo:[228,60,46]};
+
+/* ── build once: mirrored paths, z-order, tract geometry ────────────── */
+const BR = REG.map(r => {
+  const a = AT[r.lab]; if(!a) return null;
+  if(a.mid && r.id !== r.lab) return null;
+  const right = !a.mid && r.id.endsWith('_R');
+  const mir = x => AT_W - x;
+  let path = a.s();
+  if(right){ const q = new Path2D(); q.addPath(path, new DOMMatrix([-1,0,0,1,AT_W,0])); path = q; }
+  return {i:r.i, path, z:a.z, g:r.g, lab:r.lab, id:r.id, t:a.t || GTINT[r.g] || [120,130,140],
+          c:right ? [mir(a.c[0]), a.c[1]] : a.c.slice(),
+          l:a.l ? (right ? [mir(a.l[0]), a.l[1]] : a.l.slice()) : null,
+          stri:a.stri || null, right};
+}).filter(Boolean);
+const BRZ = BR.slice().sort((p, q) => p.z - q.z);
+const BRC = []; for(const b of BR) BRC[b.i] = b.c;
+/* one compound path over every neuropil — stroked in a single pass it
+   yields the union contour, so the sheath always hugs the real anatomy */
+const AT_SHEATH = (() => { const p = new Path2D(); for(const b of BR) p.addPath(b.path); return p; })();
+
+const BR_TRACT = EDGES.filter(e => BRC[e.s] && BRC[e.t] && e.s !== e.t).map(e => {
+  const A = BRC[e.s], B = BRC[e.t];
+  const dx = B[0]-A[0], dy = B[1]-A[1], L = Math.hypot(dx, dy) || 1;
+  const bow = Math.min(40, L * .18) * (A[0] + B[0] < 1000 ? 1 : -1);
+  return {s:e.s, t:e.t, w:e.w, A, B, C:[(A[0]+B[0])/2 - dy/L*bow, (A[1]+B[1])/2 + dx/L*bow]};
+});
+const qAt = (t, A, C, B) => [(1-t)*(1-t)*A[0] + 2*(1-t)*t*C[0] + t*t*B[0],
+                             (1-t)*(1-t)*A[1] + 2*(1-t)*t*C[1] + t*t*B[1]];
+
+/* labelled once per symmetric pair, as an anatomical plate would */
+const AT_MAJOR = ['ME_L','LO_L','MB_L','AL_L','LH_L','FB','EB','GNG','DN'];
+const AT_MID   = AT_MAJOR.concat(['LA_L','PB','LAL_L','SMP_L','AVLP_L']);
+const AT_FULL  = AT_MID.concat(['LOP_L','PLP_L','PVLP_L','SLP_L','SIP_L','CRE_L','BU_L','NO']);
+
+/* Activity reads as luminance on the neuropil's own colour — the way a
+   calcium overlay does — and only tips toward the hot end when it saturates,
+   so a bright region is still identifiably the same neuropil. */
+const HOT = [255, 226, 172];
+function atFill(t, a){
+  const g = .44 + a * 1.05, k = Math.max(0, (a - .60) / .40) ** 1.5;
+  const r0 = Math.min(255, t[0]*g + 10), g0 = Math.min(255, t[1]*g + 12), b0 = Math.min(255, t[2]*g + 16);
+  return `rgb(${r0+(HOT[0]-r0)*k|0},${g0+(HOT[1]-g0)*k|0},${b0+(HOT[2]-b0)*k|0})`;
+}
+
+const cBrain = document.getElementById('cBrain');
+function drawBrain(sim, upto, live){
+  const cv = cBrain; if(!cv || !cv.clientWidth) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = cv.clientWidth, h = Math.round(w * AT_H / AT_W);
+  cv.style.height = h + 'px';
+  if(cv.width !== Math.round(w * dpr)){ cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const c = cv.getContext('2d'), s = w * dpr / AT_W;
+  c.setTransform(s, 0, 0, s, 0, 0);
+  c.clearRect(0, 0, AT_W, AT_H);
+  const L = AT_W / w;                       // one CSS pixel, in atlas units
+
+  const act = REG.map((r, i) => {
+    if(!sim) return 0;
+    let a = 0, n = 0;
+    for(let t = Math.max(0, upto - 9); t <= upto; t++){ a += sim.rate[i][t]; n++; }
+    return Math.min(1, (a / Math.max(1, n)) * 3.2);
+  });
+
+  /* haemolymph */
+  const g0 = c.createRadialGradient(500, 300, 30, 500, 300, 500);
+  g0.addColorStop(0, 'rgba(58,86,112,.26)'); g0.addColorStop(.6, 'rgba(26,40,56,.13)');
+  g0.addColorStop(1, 'rgba(10,13,18,0)');
+  c.fillStyle = g0; c.fillRect(0, 0, AT_W, AT_H);
+
+  /* neural sheath: three widening strokes of the union contour */
+  c.lineJoin = c.lineCap = 'round';
+  c.lineWidth = 42; c.strokeStyle = 'rgba(24,33,44,.85)'; c.stroke(AT_SHEATH);
+  c.lineWidth = 26; c.strokeStyle = 'rgba(44,62,82,.75)'; c.stroke(AT_SHEATH);
+  c.lineWidth = 9;  c.strokeStyle = 'rgba(120,150,180,.28)'; c.stroke(AT_SHEATH);
+  c.fillStyle = 'rgba(13,18,25,.88)'; c.fill(AT_SHEATH);
+
+  /* tracts */
+  for(const tr of BR_TRACT){
+    const f = sim ? Math.min(1, act[tr.s] * tr.w * 1.6) : 0;
+    const p = new Path2D(); p.moveTo(tr.A[0], tr.A[1]); p.quadraticCurveTo(tr.C[0], tr.C[1], tr.B[0], tr.B[1]);
+    c.lineWidth = (f > .08 ? 1.0 + f * 1.8 : .9) * L;
+    c.strokeStyle = f > .08 ? heat(.30 + f * .5) : 'rgba(86,108,132,.42)';
+    c.globalAlpha = f > .08 ? .36 + f * .54 : .6;
+    c.stroke(p);
+  }
+  c.globalAlpha = 1;
+
+  /* neuropils, posterior → anterior */
+  for(const b of BRZ){
+    const a = act[b.i];
+    if(a > .38){ c.shadowColor = `rgba(${b.t[0]},${b.t[1]},${b.t[2]},.85)`; c.shadowBlur = (5 + a * 18) * L; }
+    c.fillStyle = atFill(b.t, a); c.fill(b.path, 'evenodd');
+    c.shadowBlur = 0;
+    c.lineWidth = (a > .5 ? 1.3 : .9) * L;
+    c.strokeStyle = a > .5 ? 'rgba(255,240,218,.72)' : 'rgba(132,158,186,.46)';
+    c.stroke(b.path);
+    if(b.stri){                              // medulla columnar striations
+      c.lineWidth = .7 * L; c.globalAlpha = .30 + a * .35;
+      c.strokeStyle = a > .4 ? heat(.55) : 'rgba(150,180,206,.55)';
+      for(const r of b.stri){
+        const p = new Path2D();
+        p.arc(b.right ? AT_W - OC[0] : OC[0], OC[1], r, 141*RAD, 219*RAD);
+        c.stroke(p);
+      }
+      c.globalAlpha = 1;
+    }
+  }
+
+  /* depth: light from above, clipped to the specimen */
+  c.save(); c.clip(AT_SHEATH);
+  const gd = c.createLinearGradient(0, 30, 0, AT_H);
+  gd.addColorStop(0, 'rgba(198,222,244,.13)'); gd.addColorStop(.42, 'rgba(120,150,180,.02)');
+  gd.addColorStop(1, 'rgba(0,0,0,.26)');
+  c.fillStyle = gd; c.fillRect(0, 0, AT_W, AT_H);
+  c.restore();
+
+  /* spikes riding the tracts */
+  if(sim && live){
+    const ph = performance.now() * .0007;
+    for(const tr of BR_TRACT){
+      const f = Math.min(1, act[tr.s] * tr.w * 1.8);
+      if(f < .20) continue;
+      const n = f > .6 ? 3 : 2;
+      for(let k = 0; k < n; k++){
+        const u = (ph + k / n + tr.s * .13) % 1;
+        const q = qAt(u, tr.A, tr.C, tr.B);
+        c.beginPath(); c.arc(q[0], q[1], (1.6 + f * 2.0) * L, 0, 6.2832);
+        c.fillStyle = heat(.64 + f * .32);
+        c.globalAlpha = (.3 + f * .6) * Math.sin(u * Math.PI);
+        c.fill();
+      }
+    }
+    c.globalAlpha = 1;
+  }
+
+  /* labels — one per symmetric pair, leader-lined where the neuropil is thin */
+  const fs = Math.max(6.5, Math.min(10, w / 44));
+  const ids = w < 300 ? AT_MAJOR : w < 430 ? AT_MID : AT_FULL;
+  c.font = `600 ${fs * L}px "IBM Plex Mono", monospace`;
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  for(const id of ids){
+    const b = BR.find(x => x.id === id); if(!b) continue;
+    const a = act[b.i], p = b.l || b.c;
+    if(b.l){
+      c.lineWidth = .8 * L; c.strokeStyle = 'rgba(150,174,200,.45)';
+      c.beginPath(); c.moveTo(p[0], p[1]); c.lineTo(b.c[0], b.c[1]); c.stroke();
+    }
+    c.lineWidth = 3 * L; c.strokeStyle = 'rgba(8,11,15,.82)';
+    c.strokeText(b.lab, p[0], p[1]);
+    c.fillStyle = a > .40 ? '#FFE9C8' : 'rgba(164,184,204,.82)';
+    c.fillText(b.lab, p[0], p[1]);
+  }
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -1327,6 +1648,212 @@ function showLast(m){
   scene.add(lastMarks);
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   THE FLY — a whole animal, built to the wild-type bauplan: head with
+   compound eyes, three thoracic segments carrying six legs and one pair
+   of wings, banded abdomen, halteres behind the wings. It is the thing
+   that physically moves the black pieces. Built facing -Z.
+   ══════════════════════════════════════════════════════════════════ */
+/* Wild-type colouring: the thorax is a dull tan-brown, the abdomen nearly
+   black with a tan band per tergite, the eyes deep carmine. Metalness stays
+   low — this cuticle is waxy, not chrome, and the key light here is strong
+   enough that a metallic setting blows the whole animal out to gold. */
+const matChitin = new THREE.MeshStandardMaterial({color:0x2E1200, roughness:.74, metalness:.06});
+const matNotum  = new THREE.MeshStandardMaterial({color:0x1E0B00, roughness:.66, metalness:.10});
+const matAbdo   = new THREE.MeshStandardMaterial({color:0x1A0A00, roughness:.72, metalness:.06});
+const matBand   = new THREE.MeshStandardMaterial({color:0x3C2005, roughness:.70, metalness:.06});
+const matFrons  = new THREE.MeshStandardMaterial({color:0x432A06, roughness:.62, metalness:.05});
+const matEye    = new THREE.MeshStandardMaterial({color:0x430503, roughness:.38, metalness:.03,
+                                                  emissive:0x1C0302, emissiveIntensity:.40});
+const matLeg    = new THREE.MeshStandardMaterial({color:0x0D0904, roughness:.78, metalness:.06});
+const matWing   = new THREE.MeshStandardMaterial({color:0xAFC8DC, roughness:.10, metalness:0,
+                                                  transparent:true, opacity:.30,
+                                                  side:THREE.DoubleSide, depthWrite:false});
+
+/* Body length ≈ 0.9 of a square. Big enough to read as an animal next to a
+   pawn, small enough that it never stops reading as an insect. Faces -Z. */
+const flyWings = [], flyLegs = [];
+function buildFly(){
+  const g = new THREE.Group();
+  const solid = (geo, mat) => { const m = new THREE.Mesh(geo, mat); m.castShadow = true; return m; };
+  const put = (m, x, y, z, sx, sy, sz) => { m.position.set(x, y, z); m.scale.set(sx, sy, sz); g.add(m); return m; };
+
+  /* thorax: one rounded block, humped at the notum, pinched at the waist */
+  put(solid(new THREE.SphereGeometry(.135, 22, 16), matChitin), 0, 0, -.055, 1, .94, 1.36);
+  put(solid(new THREE.SphereGeometry(.112, 18, 14), matNotum),  0, .052, -.085, 1.02, .70, 1.12);
+  put(solid(new THREE.SphereGeometry(.080, 16, 12), matChitin), 0, .028, .060, 1.02, .74, .86);  // scutellum
+  put(solid(new THREE.SphereGeometry(.058, 14, 10), matAbdo),   0, -.010, .095, 1, .84, .70);    // waist
+
+  /* head: the compound eyes are most of it, with a pale frons down the middle */
+  put(solid(new THREE.SphereGeometry(.112, 18, 14), matChitin), 0, -.008, -.222, .90, .92, .74);
+  put(solid(new THREE.SphereGeometry(.070, 14, 11), matFrons),  0, .006, -.262, .40, 1.00, .78);
+  for(const sx of [1, -1]){
+    // seated into the head capsule, not stuck on it: a fly's eye IS the side of its head
+    put(solid(new THREE.SphereGeometry(.098, 20, 15), matEye), .048 * sx, .002, -.220, .76, 1.00, .86);
+    const ar = solid(new THREE.CylinderGeometry(.006, .014, .070, 6), matLeg);   // arista
+    ar.position.set(.028 * sx, -.052, -.300); ar.rotation.set(1.25, 0, .22 * sx); g.add(ar);
+  }
+  put(solid(new THREE.ConeGeometry(.032, .074, 10), matLeg), 0, -.080, -.258, 1, 1, 1).rotation.x = Math.PI;
+
+  /* abdomen: four tergites, each a shade shorter, banded tan on black */
+  const seg = [[.122, .142], [.118, .212], [.101, .274], [.076, .322]];
+  for(const [r, z] of seg){
+    put(solid(new THREE.SphereGeometry(r, 18, 13), matAbdo), 0, -.010, z, 1, .84, .78);
+    put(solid(new THREE.SphereGeometry(r * 1.02, 18, 7, 0, 6.2832, 0, 1.12), matBand),
+        0, -.010, z - r * .34, 1, .84, .78);
+  }
+  put(solid(new THREE.SphereGeometry(.052, 12, 9), matAbdo), 0, -.010, .352, 1, .90, .86);
+
+  /* wings: hinged at the notum, held swept back over the abdomen */
+  const wingGeo = new THREE.CircleGeometry(1, 28);
+  for(const sx of [1, -1]){
+    const pivot = new THREE.Group(); pivot.position.set(.052 * sx, .092, -.050);
+    const w = new THREE.Mesh(wingGeo, matWing);
+    w.rotation.x = Math.PI / 2;               // circle lies in XY; lay it into XZ, +Y → +Z
+    w.scale.set(.118, .335, 1);               // half-width, half-length
+    w.position.set(0, 0, .310);
+    w.castShadow = false; pivot.add(w); g.add(pivot);
+    flyWings.push({pivot, sx});
+    put(solid(new THREE.SphereGeometry(.019, 10, 8), matBand), .062 * sx, .004, .108, 1, 1, 1); // haltere
+  }
+
+  /* Six legs, each a coxa pivot carrying femur → tibia → tarsus. A fly's legs
+     hang UNDER the body and fold inward; splaying them sideways is what makes
+     a model read as a spider, so the splay stays small and the knees bend in. */
+  const LEG = [[-.120, -.62, .40], [-.010, -.05, .34], [.095, .58, .30]];   // z, sweep, splay
+  for(let i = 0; i < 3; i++){
+    for(const sx of [1, -1]){
+      const [lz, sweep, splay] = LEG[i];
+      const root = new THREE.Group();
+      root.position.set(.082 * sx, -.062, lz);
+      root.rotation.order = 'ZYX';
+      const fem = new THREE.Group(); root.add(fem);
+      const tib = new THREE.Group(); tib.position.y = -.160; fem.add(tib);
+      const bone = (len, r0, r1, parent) => {
+        const m = solid(new THREE.CylinderGeometry(r0, r1, len, 6), matLeg);
+        m.position.y = -len / 2; parent.add(m); return m;
+      };
+      bone(.160, .0125, .0180, fem);                    // femur
+      bone(.150, .0080, .0115, tib);                    // tibia
+      const tar = bone(.098, .0048, .0075, tib); tar.position.y = -.196;
+      g.add(root);
+      flyLegs.push({root, fem, tib, sx, sweep, splay,
+                    open:{r:.34, f:.42, t:1.15}, grip:{r:.13, f:.20, t:1.74}});
+    }
+  }
+  return g;
+}
+
+/* A fly that carries a rook is already fantasy; what matters is that it reads
+   as an animal from the default camera, thirteen units out. Built at life
+   proportion, then scaled to about a knight's height. */
+const FLY_SCALE = 1.5;
+const flyObj = buildFly();
+flyObj.scale.setScalar(FLY_SCALE);
+const FLY_PERCH = new THREE.Vector3(2.60, 1.70, -5.35);
+flyObj.position.copy(FLY_PERCH);
+scene.add(flyObj);
+
+/* how high the animal must hover to hold each piece by its head */
+const PIECE_TOP = {p:.72, n:1.18, b:1.28, r:1.06, q:1.18, k:1.46};
+const FLY_PHASE = [['approach', 360], ['grip', 120], ['carry', 470], ['place', 130], ['retreat', 330]];
+const FLY_TOTAL = FLY_PHASE.reduce((a, p) => a + p[1], 0);
+let flyAnim = null, flyGrip = 0, flyBeat = 1, flyYaw = Math.PI;
+
+const ease = u => u < .5 ? 2*u*u : 1 - 2*(1-u)*(1-u);
+function flyFace(tx, tz, k){
+  const dx = tx - flyObj.position.x, dz = tz - flyObj.position.z;
+  if(dx*dx + dz*dz < 4e-4) return;
+  const want = Math.atan2(-dx, -dz);            // the body faces -Z
+  let d = want - flyYaw;
+  while(d > Math.PI) d -= 6.2832;
+  while(d < -Math.PI) d += 6.2832;
+  flyYaw += d * k;
+}
+
+/** Fly in, take the piece off its square, carry it, set it down, leave. */
+function flyCarry(m, obj, done){
+  const type = (state.b[m.to] || 'p').toLowerCase();
+  const gh = (PIECE_TOP[type] || .8) + .34 * FLY_SCALE;   // the legs reach ~.40 unscaled
+  flyAnim = {obj, done, gh, cap:pieceObjs.get(m.to) || null,
+             a:sqToWorld(m.from), b:sqToWorld(m.to),
+             from:flyObj.position.clone(), t0:performance.now(), settled:false};
+}
+function flyLand(A){
+  if(A.settled) return;                          // done() exactly once, as before
+  A.settled = true; flyAnim = null; flyGrip = 0;
+  A.obj.position.copy(A.b);
+  A.done();
+}
+function stepFly(now){
+  const A = flyAnim;
+  if(!A){ flyBeat += ((reduceMotion ? 0 : .35) - flyBeat) * .05; return; }
+  flyBeat += (1 - flyBeat) * .2;
+  let e = now - A.t0, i = 0;
+  while(i < FLY_PHASE.length - 1 && e > FLY_PHASE[i][1]){ e -= FLY_PHASE[i][1]; i++; }
+  const u = Math.min(1, e / FLY_PHASE[i][1]), s = ease(u), name = FLY_PHASE[i][0];
+  const cruise = A.gh + .62;
+  if(name === 'approach'){
+    flyObj.position.lerpVectors(A.from, new THREE.Vector3(A.a.x, A.gh, A.a.z), s);
+    flyObj.position.y += Math.sin(s * Math.PI) * .55;
+    flyFace(A.a.x, A.a.z, .16); flyGrip = 0;
+  } else if(name === 'grip'){
+    flyObj.position.set(A.a.x, A.gh, A.a.z);
+    flyGrip = s;
+  } else if(name === 'carry'){
+    flyObj.position.set(A.a.x + (A.b.x - A.a.x) * s, A.gh + Math.sin(s * Math.PI) * (cruise - A.gh),
+                        A.a.z + (A.b.z - A.a.z) * s);
+    A.obj.position.set(flyObj.position.x, Math.max(0, flyObj.position.y - A.gh), flyObj.position.z);
+    flyFace(A.b.x, A.b.z, .14); flyGrip = 1;
+    if(A.cap && s > .45){                        // the taken piece is shouldered aside
+      const k = Math.min(1, (s - .45) / .55);
+      A.cap.position.y = -k * .55;
+      A.cap.rotation.z = k * .9;
+    }
+  } else if(name === 'place'){
+    flyObj.position.set(A.b.x, A.gh + s * .22, A.b.z);
+    A.obj.position.copy(A.b);
+    flyGrip = 1 - s;
+  } else {
+    flyObj.position.lerpVectors(new THREE.Vector3(A.b.x, A.gh + .22, A.b.z), FLY_PERCH, s);
+    flyObj.position.y += Math.sin(s * Math.PI) * .45;
+    flyFace(FLY_PERCH.x, FLY_PERCH.z, .10); flyGrip = 0;
+    if(u >= 1) flyLand(A);
+  }
+}
+/** Wing beat, leg pose and the hover jitter that keeps it alive on its perch. */
+function poseFly(now){
+  const t = now * .001;
+  if(!flyAnim && !reduceMotion){
+    flyObj.position.set(FLY_PERCH.x + Math.sin(t * .7) * .10,
+                        FLY_PERCH.y + Math.sin(t * 1.9) * .055,
+                        FLY_PERCH.z + Math.cos(t * .55) * .07);
+    flyFace(0, -1.2, .02);
+  }
+  flyObj.rotation.y = flyYaw;
+  flyObj.rotation.x = (flyAnim ? -.12 : -.04) + (reduceMotion ? 0 : Math.sin(t * 2.3) * .03);
+  flyObj.rotation.z = reduceMotion ? 0 : Math.sin(t * 1.6) * .04;
+  /* ~200 Hz is not renderable; beat fast enough to blur and keep the stroke
+     plane where a real wing's is — swept back and angled down on the return */
+  const f = reduceMotion ? .18 : (.30 + .62 * flyBeat) * Math.sin(t * 46);
+  for(const w of flyWings){
+    w.pivot.rotation.z = w.sx * (.20 + f);
+    w.pivot.rotation.y = w.sx * (.34 - .18 * flyBeat);
+    w.pivot.rotation.x = -.10 * f;
+  }
+  const g = flyGrip;
+  for(const L of flyLegs){
+    const o = L.open, c = L.grip;
+    // splay narrows and the legs swing under the body as the grip closes
+    L.root.rotation.z = L.sx * L.splay * ((o.r + (c.r - o.r) * g) / o.r);
+    L.root.rotation.x = L.sweep * (1 - g * .45);
+    L.fem.rotation.z = L.sx * (o.f + (c.f - o.f) * g);   // femur carries on outward
+    L.tib.rotation.z = -L.sx * (o.t + (c.t - o.t) * g);  // knee folds back under
+    L.fem.rotation.x = .20 * (1 - g);
+    L.tib.rotation.x = .26 + .50 * g;
+  }
+}
+
 /* ── orbit ────────────────────────────────────────────────────────── */
 const orbit = {az:0, pol:0.80, dist:13.6, tAz:0, tPol:0.80, tDist:13.6};
 let flipped = false;
@@ -1379,12 +1906,31 @@ let anim = null, lastSim = null, lastDN = null, playT = T_STEPS - 1, playing = f
 let flyThinking = false;          // hard guard: only ever one fly reply in flight
 
 const $ = id => document.getElementById(id);
-const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* prefers-reduced-motion is set on a lot of ordinary Windows machines — the
+   "Show animations in Windows" switch and every battery saver flips it — so
+   this can be true for a visitor who never asked for it. It must suppress
+   MOTION (a piece gliding across the board), not the fly's deliberation,
+   which is the thing the demo exists to show. Reduced mode keeps the full
+   96-step trial and steps the scope through it instead of sweeping it. */
+const mqReduce = matchMedia('(prefers-reduced-motion: reduce)');
+let motionPref = 'auto', reduceMotion = false;
+try{ motionPref = localStorage.getItem('cf-motion') || 'auto'; }catch(e){}
+function applyMotion(){
+  reduceMotion = motionPref === 'stepped' || (motionPref === 'auto' && mqReduce.matches);
+  const b = $('bMotion');
+  if(b) b.textContent = motionPref === 'auto' ? 'AUTO · ' + (reduceMotion ? 'STEPPED' : 'FULL')
+                      : motionPref === 'full' ? 'FULL' : 'STEPPED';
+}
+if(mqReduce.addEventListener) mqReduce.addEventListener('change', applyMotion);
+else if(mqReduce.addListener) mqReduce.addListener(applyMotion);
 
 function redrawScope(){
   drawGraph(lastSim, playT);
   drawRaster(lastSim, playT);
   drawDN(lastDN, playing ? Math.min(1, Math.max(0, (playT - 56) / 30)) : (lastDN ? 1 : 0));
+  drawBrain(lastSim, playT, true);
+  $('blT').textContent = (playT * 0.5).toFixed(1) + ' ms';
 }
 function setReadout(){
   $('rT').textContent = (playT * 0.5).toFixed(1);
@@ -1456,14 +2002,23 @@ function pick(e){
   } else { selected = null; selMoves = []; showMarks(null, []); }
 }
 
-function animateMove(m, done){
+function animateMove(m, done, byFly){
   const obj = pieceObjs.get(m.from);
   // Single early-exit. done() must be invoked exactly once, on exactly one path.
   if(!obj || reduceMotion){ done(); return; }
+  if(byFly){
+    // the animal picks the piece up and carries it; same one-shot contract
+    flyCarry(m, obj, done);
+    const cur = flyAnim;
+    setTimeout(() => { if(flyAnim === cur) flyLand(cur); }, FLY_TOTAL + 500);
+    return;
+  }
   const a = sqToWorld(m.from), b = sqToWorld(m.to);
   // the move is already applied, so the piece now sits on m.to
   const hop = state.b[m.to] && state.b[m.to].toLowerCase() === 'n' ? .75 : .18;
-  anim = {obj, a, b, hop, t0:performance.now(), dur:270, done};
+  const cur = anim = {obj, a, b, hop, t0:performance.now(), dur:270, done};
+  // same guard as the trial: no animation frames must not mean no move
+  setTimeout(() => { if(anim === cur){ anim = null; cur.obj.position.copy(cur.b); done(); } }, 900);
 }
 
 function playMove(m, byHuman){
@@ -1480,7 +2035,7 @@ function playMove(m, byHuman){
     if(checkEnd()) return;
     if(byHuman) flyTurn();
     else setVerdict('White to move — click a piece.');
-  });
+  }, !byHuman);
 }
 
 function flyTurn(){
@@ -1494,21 +2049,34 @@ function flyTurn(){
   const res = searchBest(state, depth);
   lastDN = dnReadout(lastSim, res ? res.move : null, legal);
   playT = 0; playing = true;
-  const t0 = performance.now();
-  const dur = reduceMotion ? 0 : 1150;
-  (function step(){
-    const e = reduceMotion ? 1 : Math.min(1, (performance.now() - t0) / dur);
-    playT = Math.round(e * (T_STEPS - 1));
-    redrawScope(); setReadout();
-    if(e < 1){ requestAnimationFrame(step); return; }
-    playing = false;
+  $('brainLay').classList.add('run'); $('blState').textContent = 'integrating';
+  const t0 = performance.now(), dur = 1150;
+  let shown = -1, settled = false;
+  function settle(){
+    if(settled) return;                            // exactly one close-out
+    settled = true; playing = false; playT = T_STEPS - 1;
+    $('brainLay').classList.remove('run'); $('blState').textContent = 'settled';
     $('scopeState').textContent = 'settled';
     $('rDn').textContent = res ? sqName(res.move.from) + '→' + sqName(res.move.to) : '—';
-    redrawScope();
+    redrawScope(); setReadout();
     flyThinking = false; busy = false;
     if(!res){ checkEnd(); return; }
     playMove(res.move, false);
+  }
+  (function step(){
+    if(settled) return;
+    const e = Math.min(1, (performance.now() - t0) / dur);
+    // stepped playback advances in 8 discrete jumps — the trial still takes
+    // its 1.15 s, but nothing sweeps continuously
+    const q = reduceMotion ? Math.round(e * 8) / 8 : e;
+    playT = Math.round(q * (T_STEPS - 1));
+    if(playT !== shown){ shown = playT; redrawScope(); setReadout(); }
+    if(e < 1){ requestAnimationFrame(step); return; }
+    settle();
   })();
+  /* a background tab stops serving animation frames, and some hosts throttle
+     them hard; the trial has to land either way or the game soft-locks */
+  setTimeout(settle, dur + 500);
 }
 
 /* ── controls ─────────────────────────────────────────────────────── */
@@ -1517,6 +2085,19 @@ $('ladder').addEventListener('click', e => {
   [...$('ladder').children].forEach(x => x.setAttribute('aria-pressed', 'false'));
   b.setAttribute('aria-pressed', 'true');
   depth = +b.dataset.d;
+});
+const MOTION_CYCLE = {auto:'full', full:'stepped', stepped:'auto'};
+$('bMotion').addEventListener('click', () => {
+  motionPref = MOTION_CYCLE[motionPref];
+  try{ localStorage.setItem('cf-motion', motionPref); }catch(e){}
+  applyMotion();
+});
+$('bBrainTog').addEventListener('click', () => {
+  const el = $('brainLay'), min = el.classList.toggle('min');
+  $('bBrainTog').textContent = min ? '+' : '–';
+  $('bBrainTog').setAttribute('aria-expanded', String(!min));
+  $('bBrainTog').title = (min ? 'Expand' : 'Collapse') + ' the brain plate';
+  if(!min) drawBrain(lastSim, playT, true);
 });
 $('bNew').addEventListener('click', () => reset());
 $('bFlip').addEventListener('click', () => { flipped = !flipped; });
@@ -1542,12 +2123,14 @@ function restingScope(){
   lastDN = dnReadout(lastSim, null, legalMoves(state));
   playT = T_STEPS - 1; playing = false;
   $('scopeState').textContent = 'resting';
+  $('blState').textContent = 'resting';
   $('rDn').textContent = '—';
   redrawScope(); setReadout();
 }
 
 function reset(){
   state = newState(); history = []; over = false; busy = false; flyThinking = false; anim = null;
+  flyAnim = null; flyGrip = 0; flyObj.position.copy(FLY_PERCH);
   selected = null; selMoves = []; lastSim = null; lastDN = null; playT = T_STEPS - 1;
   rebuildPieces(state); showMarks(null, []); showLast(null);
   renderLog(); refreshEval(); restingScope();
@@ -1567,12 +2150,20 @@ $('tabPlay').addEventListener('click', () => setView(true));
 $('tabPlan').addEventListener('click', () => setView(false));
 
 /* ── main loop ────────────────────────────────────────────────────── */
+let lastPlate = 0;
 function tick(){
   requestAnimationFrame(tick);
+  /* between turns the plate still ticks over, at 9 fps and only while it is
+     open — enough for the tracts to read as live, cheap enough to ignore */
+  const now = performance.now();
+  if(!playing && !reduceMotion && now - lastPlate > 110 && !$('brainLay').classList.contains('min')){
+    lastPlate = now; drawBrain(lastSim, playT, true);
+  }
   orbit.az += (orbit.tAz - orbit.az) * .16;
   orbit.pol += (orbit.tPol - orbit.pol) * .16;
   orbit.dist += (orbit.tDist - orbit.dist) * .12;
   applyCam();
+  stepFly(now); poseFly(now);
   if(anim){
     const e = Math.min(1, (performance.now() - anim.t0) / anim.dur);
     const s = e < .5 ? 2*e*e : 1 - 2*(1-e)*(1-e);
@@ -1586,6 +2177,11 @@ function tick(){
 /* boot */
 function start(snap){
   resize();
+  applyMotion();
+  if(window.innerWidth < 620){
+    $('brainLay').classList.add('min'); $('bBrainTog').textContent = '+';
+    $('bBrainTog').setAttribute('aria-expanded', 'false');
+  }
   if(snap && snap.history && snap.history.length){
     state = newState(); history = [];
     for(const h of snap.history){
