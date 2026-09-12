@@ -1,0 +1,1611 @@
+<title>ChessFly</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<style>
+/* ── ChessFly · single-theme instrument rig ─────────────────────────────
+   Committed dark: this is an electrophysiology panel and a WebGL specimen
+   stage. Every colour painted explicitly so the page holds on any host
+   ground. Palette derived from the animal: wild-type eye red, amber
+   cuticle, cool haemolymph blue-black. Data ramps black-body.          */
+
+:root{
+  --void:#0D1015; --panel:#151A21; --raise:#1E252F; --sunk:#0A0D12;
+  --rule:#2B3542; --rule-2:#3A4756;
+  --text:#DCE2E9; --dim:#8795A4; --faint:#5D6B7A;
+  --eye:#E0392C; --eye-d:#8E1F17;
+  --cuticle:#D9A441; --sage:#7FA57C;
+  --sq-l:#C7B287; --sq-d:#36404D;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ui:"Archivo",system-ui,-apple-system,Segoe UI,sans-serif;
+  --body:"Spectral",Georgia,"Times New Roman",serif;
+  --rail:52px;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--void); color:var(--text);
+  font-family:var(--ui); font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+a{color:var(--cuticle)}
+:focus-visible{outline:2px solid var(--cuticle); outline-offset:2px}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+
+/* ── top rail ───────────────────────────────────────────────────────── */
+.rail{
+  height:var(--rail); border-bottom:1px solid var(--rule);
+  background:var(--panel); display:flex; align-items:center;
+  gap:16px; padding:0 16px; position:sticky; top:0; z-index:30;
+}
+.mark{font-weight:700; font-size:15px; letter-spacing:.14em; text-transform:uppercase; white-space:nowrap}
+.mark em{font-style:normal; color:var(--eye)}
+.specimen{
+  font-family:var(--mono); font-size:10px; color:var(--faint);
+  letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  border-left:1px solid var(--rule); padding-left:16px; flex:1; min-width:0;
+}
+.seg{display:flex; border:1px solid var(--rule-2); margin-left:auto; flex:none}
+.seg button{
+  font-family:var(--mono); font-size:10px; font-weight:500; letter-spacing:.16em;
+  padding:7px 14px; color:var(--dim); background:var(--sunk);
+}
+.seg button+button{border-left:1px solid var(--rule-2)}
+.seg button[aria-pressed="true"]{background:var(--cuticle); color:#14181E}
+
+/* ── view scaffold ──────────────────────────────────────────────────── */
+.view{display:none}
+.view.on{display:block}
+
+/* ═══ PLAY ══════════════════════════════════════════════════════════ */
+.caveat{
+  display:flex; gap:12px; align-items:baseline; padding:9px 16px;
+  background:#1A1508; border-bottom:1px solid var(--rule);
+  border-left:3px solid var(--cuticle);
+  font-family:var(--mono); font-size:11px; line-height:1.55; color:#C6B48C;
+}
+.caveat b{color:var(--cuticle); font-weight:600; letter-spacing:.1em; white-space:nowrap}
+
+.view.on#vPlay{display:flex; flex-direction:column; height:calc(100vh - var(--rail)); min-height:600px}
+.stage{display:grid; grid-template-columns:minmax(0,1fr) 352px; flex:1; min-height:0}
+.board-cell{position:relative; min-width:0; background:radial-gradient(ellipse at 50% 34%,#171D26 0%,#0B0E13 72%)}
+#gl{display:block; width:100%; height:100%; touch-action:none; cursor:grab}
+#gl.picking{cursor:pointer}
+
+.hud{
+  position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center;
+  gap:14px; padding:8px 14px; background:rgba(10,13,18,.86);
+  border-top:1px solid var(--rule); font-family:var(--mono); font-size:11px;
+  backdrop-filter:blur(6px); flex-wrap:wrap;
+}
+.hud .who{display:flex; align-items:center; gap:7px; color:var(--dim)}
+.dot{width:9px; height:9px; border:1px solid var(--rule-2); flex:none}
+.dot.w{background:var(--sq-l)} .dot.f{background:#6E1B14}
+.hud .grow{flex:1; min-width:0}
+#verdict{color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+#verdict.win{color:var(--sage)} #verdict.lose{color:var(--eye)}
+
+/* instrument stack */
+.stack{
+  border-left:1px solid var(--rule); background:var(--panel);
+  overflow-y:auto; display:flex; flex-direction:column;
+}
+.mod{border-bottom:1px solid var(--rule); padding:14px 14px 16px}
+.mod > h2{
+  margin:0 0 12px; font-family:var(--mono); font-size:10px; font-weight:600;
+  letter-spacing:.2em; color:var(--faint); display:flex; justify-content:space-between;
+  align-items:center; gap:8px;
+}
+.mod > h2 span{letter-spacing:.04em; font-weight:400; color:var(--faint)}
+
+/* opponent ladder — rows ARE the milestone table */
+.ladder{display:flex; flex-direction:column; border:1px solid var(--rule)}
+.lvl{
+  display:grid; grid-template-columns:38px 1fr auto; align-items:center;
+  gap:10px; padding:9px 11px; text-align:left; background:var(--sunk);
+  border-bottom:1px solid var(--rule);
+}
+.lvl:last-child{border-bottom:none}
+.lvl:hover:not(:disabled){background:var(--raise)}
+.lvl[aria-pressed="true"]{background:var(--raise); box-shadow:inset 3px 0 0 var(--cuticle)}
+.lvl .ms{font-family:var(--mono); font-size:10px; color:var(--faint); letter-spacing:.08em}
+.lvl[aria-pressed="true"] .ms{color:var(--cuticle)}
+.lvl .nm{font-size:12.5px; color:var(--text)}
+.lvl .nm i{display:block; font-style:normal; font-family:var(--mono); font-size:9.5px; color:var(--faint); margin-top:2px; letter-spacing:.02em}
+.lvl .el{font-family:var(--mono); font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums}
+.lvl:disabled{cursor:not-allowed; opacity:1}
+.lvl:disabled .nm,.lvl:disabled .el{color:var(--faint); text-decoration:line-through; text-decoration-color:var(--eye-d)}
+.lvl:disabled .nm i{text-decoration:none; color:var(--eye); letter-spacing:.02em}
+
+/* brain scope */
+.scope{border:1px solid var(--rule); background:var(--sunk)}
+.scope canvas{display:block; width:100%}
+.scope .sep{border-top:1px solid var(--rule)}
+.readout{
+  display:grid; grid-template-columns:repeat(4,1fr); font-family:var(--mono);
+  font-size:10px; border-top:1px solid var(--rule);
+}
+.readout div{padding:6px 8px; border-right:1px solid var(--rule); min-width:0}
+.readout div:last-child{border-right:none}
+.readout b{display:block; color:var(--faint); font-weight:400; letter-spacing:.1em; font-size:9px; margin-bottom:2px}
+.readout u{text-decoration:none; color:var(--cuticle); font-variant-numeric:tabular-nums; font-size:11.5px}
+
+/* move log */
+.log{
+  font-family:var(--mono); font-size:11.5px; max-height:152px; overflow-y:auto;
+  border:1px solid var(--rule); background:var(--sunk);
+}
+.log ol{margin:0; padding:0; list-style:none}
+.log li{display:grid; grid-template-columns:30px 1fr 1fr; gap:6px; padding:3px 9px; border-bottom:1px solid #1A212A}
+.log li:last-child{border-bottom:none}
+.log .n{color:var(--faint)} .log .f{color:var(--eye)}
+.log .empty{padding:12px 9px; color:var(--faint); font-size:10.5px}
+
+.acts{display:flex; gap:8px; padding:14px}
+.acts button{
+  flex:1; font-family:var(--mono); font-size:10px; font-weight:500; letter-spacing:.14em;
+  padding:9px 4px; border:1px solid var(--rule-2); background:var(--sunk); color:var(--dim);
+}
+.acts button:hover{border-color:var(--cuticle); color:var(--cuticle)}
+
+/* ═══ PLAN ══════════════════════════════════════════════════════════ */
+.doc{max-width:1080px; margin:0 auto; padding:0 24px; padding-block:44px 96px; display:grid; grid-template-columns:150px minmax(0,68ch); gap:48px; justify-content:center}
+.toc{position:sticky; top:calc(var(--rail) + 32px); align-self:start; font-family:var(--mono); font-size:10.5px; display:flex; flex-direction:column; gap:1px}
+.toc a{display:block; padding:4px 0 4px 10px; color:var(--faint); text-decoration:none; border-left:1px solid var(--rule); letter-spacing:.04em}
+.toc a:hover{color:var(--cuticle); border-left-color:var(--cuticle)}
+.toc .tt{color:var(--faint); opacity:.6; padding:0 0 8px 10px; letter-spacing:.2em; border:none}
+
+article{font-family:var(--body); font-size:16.5px; line-height:1.68; color:#CDD5DE}
+article > p{margin:0 0 18px}
+article h2{
+  font-family:var(--ui); font-size:12px; font-weight:600; letter-spacing:.2em;
+  text-transform:uppercase; color:var(--cuticle); margin:52px 0 14px;
+  padding-bottom:8px; border-bottom:1px solid var(--rule);
+  display:flex; gap:12px; align-items:baseline; text-wrap:balance;
+}
+article h2 .no{font-family:var(--mono); color:var(--faint); font-weight:400; letter-spacing:.04em}
+article h2:first-child{margin-top:0}
+article h3{font-family:var(--ui); font-size:14px; font-weight:600; letter-spacing:.01em; color:var(--text); margin:30px 0 10px; text-wrap:balance}
+article strong{color:var(--text); font-weight:600}
+article em{color:#BFC8D2}
+article code{font-family:var(--mono); font-size:.84em; background:var(--panel); border:1px solid var(--rule); padding:1px 5px; color:var(--cuticle)}
+article ul,article ol{margin:0 0 18px; padding-left:22px}
+article li{margin-bottom:7px}
+article li::marker{color:var(--faint)}
+
+.lede{
+  font-size:19px; line-height:1.58; color:var(--text); border-left:3px solid var(--eye);
+  padding:2px 0 2px 20px; margin:0 0 26px;
+}
+.lede b{color:var(--eye); font-weight:600}
+
+.tw{overflow-x:auto; margin:0 0 22px; border:1px solid var(--rule); background:var(--panel)}
+table{border-collapse:collapse; width:100%; font-family:var(--mono); font-size:11.5px; min-width:360px}
+th,td{padding:7px 11px; text-align:left; border-bottom:1px solid var(--rule); vertical-align:top; white-space:nowrap}
+th{color:var(--faint); font-weight:500; letter-spacing:.1em; font-size:9.5px; text-transform:uppercase; background:var(--sunk)}
+td{color:#B9C3CE}
+td.num{text-align:right; font-variant-numeric:tabular-nums; color:var(--text)}
+td.hit{color:var(--cuticle)}
+tr.pick td{background:#1A2029; color:var(--text)}
+tr:last-child td{border-bottom:none}
+tr.sum td{border-top:1px solid var(--rule-2); color:var(--cuticle)}
+td.wrap,th.wrap{white-space:normal; min-width:150px}
+
+.note{
+  border:1px solid var(--rule); border-left:3px solid var(--cuticle);
+  background:var(--panel); padding:14px 16px; margin:0 0 22px;
+  font-family:var(--mono); font-size:12px; line-height:1.6; color:#B9C3CE;
+}
+.note.kill{border-left-color:var(--eye)}
+.note b{color:var(--text)}
+.note .hd{display:block; color:var(--cuticle); font-size:9.5px; letter-spacing:.2em; margin-bottom:7px}
+.note.kill .hd{color:var(--eye)}
+
+.eq{
+  font-family:var(--mono); font-size:13px; color:var(--cuticle); background:var(--sunk);
+  border:1px solid var(--rule); padding:13px 16px; margin:0 0 22px; text-align:center;
+  overflow-x:auto; white-space:nowrap;
+}
+.foot{margin-top:56px; padding-top:20px; border-top:1px solid var(--rule); font-family:var(--mono); font-size:10.5px; color:var(--faint); line-height:1.7}
+
+/* ── responsive ─────────────────────────────────────────────────────── */
+@media (max-width:1000px){
+  .doc{grid-template-columns:minmax(0,68ch); gap:0}
+  .toc{display:none}
+}
+@media (max-width:900px){
+  .view.on#vPlay{height:auto; display:block}
+  .stage{grid-template-columns:minmax(0,1fr)}
+  .board-cell{height:min(66vh,520px)}
+  .stack{border-left:none; border-top:1px solid var(--rule); overflow:visible}
+}
+@media (max-width:560px){
+  .rail{gap:10px; padding:0 12px}
+  .specimen{display:none}
+  .doc{padding-inline:16px}
+  article{font-size:16px}
+  .caveat{flex-direction:column; gap:4px}
+}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms !important; transition-duration:.01ms !important}}
+</style>
+
+<div class="rail">
+  <div class="mark">Chess<em>Fly</em></div>
+  <div class="specimen">FAFB&nbsp;v783 · 139,255 neurons · 54.5M synapses · 55.2M trainable · ceiling 1,750&nbsp;Elo</div>
+  <div class="seg" role="group" aria-label="View">
+    <button id="tabPlay" aria-pressed="true">PLAY</button>
+    <button id="tabPlan" aria-pressed="false">PLAN</button>
+  </div>
+</div>
+
+<!-- ══════════════════════ PLAY ══════════════════════ -->
+<section class="view on" id="vPlay">
+  <div class="caveat">
+    <b>STAND-IN</b>
+    <span>The trained connectome does not exist. Moves come from piece-square tables + α–β at the depth shown; the brain panel is a 39-neuropil LIF surrogate, untrained, with its readout clamped to the played move. Everything here is the <em>harness</em> described in §1 and §3 — not a result.</span>
+  </div>
+
+  <div class="stage">
+    <div class="board-cell">
+      <canvas id="gl"></canvas>
+      <div class="hud">
+        <span class="who"><i class="dot w"></i>YOU</span>
+        <span class="who"><i class="dot f"></i>FLY</span>
+        <span id="verdict" class="grow">White to move — click a piece.</span>
+        <span id="evalTxt" style="color:var(--faint)">eval −0.00</span>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="mod">
+        <h2>Opponent <span>§8 milestone</span></h2>
+        <div class="ladder" id="ladder">
+          <button class="lvl" data-d="1" aria-pressed="false"><span class="ms">M3</span><span class="nm">Greedy readout<i>1-ply argmax · Dec 2026</i></span><span class="el">1200</span></button>
+          <button class="lvl" data-d="2" aria-pressed="true"><span class="ms">M4</span><span class="nm">Puzzle-tuned<i>2-ply + quiescence · Feb 2027</i></span><span class="el">1500</span></button>
+          <button class="lvl" data-d="3" aria-pressed="false"><span class="ms">M6</span><span class="nm">Post self-play<i>3-ply + quiescence · Jun 2027</i></span><span class="el">1800</span></button>
+          <button class="lvl" disabled><span class="ms">—</span><span class="nm">Stockfish, max<i>151× over connectome capacity — §2</i></span><span class="el">3600</span></button>
+        </div>
+      </div>
+
+      <div class="mod">
+        <h2>Brain <span id="scopeState">idle</span></h2>
+        <div class="scope">
+          <canvas id="cGraph" height="380" aria-label="Neuropil activity graph"></canvas>
+          <div class="sep"></div>
+          <canvas id="cRaster" height="260" aria-label="Spike raster"></canvas>
+          <div class="sep"></div>
+          <canvas id="cDN" height="150" aria-label="Descending-neuron move readout"></canvas>
+          <div class="readout">
+            <div><b>t / ms</b><u id="rT">0.0</u></div>
+            <div><b>RATE Hz</b><u id="rHz">0.0</u></div>
+            <div><b>SPIKES</b><u id="rSp">0</u></div>
+            <div><b>DN ARGMAX</b><u id="rDn">—</u></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mod">
+        <h2>Moves <span id="plyCount">0 ply</span></h2>
+        <div class="log" id="log"><div class="empty">No moves yet.</div></div>
+      </div>
+
+      <div class="acts">
+        <button id="bNew">NEW GAME</button>
+        <button id="bUndo">UNDO</button>
+        <button id="bFlip">FLIP</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════ PLAN ══════════════════════ -->
+<section class="view" id="vPlan">
+<div class="doc">
+  <nav class="toc">
+    <span class="tt">SECTIONS</span>
+    <a href="#s0">0 · Verdict</a><a href="#s1">1 · Substrate</a><a href="#s2">2 · Capacity</a>
+    <a href="#s3">3 · I/O encoding</a><a href="#s4">4 · Learning rule</a><a href="#s5">5 · Curriculum</a>
+    <a href="#s6">6 · Evaluation</a><a href="#s7">7 · Kill criteria</a><a href="#s8">8 · Milestones</a>
+  </nav>
+
+  <article>
+    <h2 id="s0"><span class="no">00</span> Verdict</h2>
+    <p class="lede">3600 Elo is unreachable. Not by a tuning margin — by <b>~151×</b> in parameter capacity, and by a second, independent gap that capacity cannot close.</p>
+
+    <h3>Wall 1 — capacity</h3>
+    <p>Fit a log-linear curve through the three public policy-only (1-node, no search) anchors:</p>
+    <div class="tw"><table>
+      <tr><th class="wrap">Network</th><th>Params</th><th>Policy-only Elo</th></tr>
+      <tr><td class="wrap">Maia-1900 (6×64 ResNet)</td><td class="num">1.2M</td><td class="num">~1900</td></tr>
+      <tr><td class="wrap">Leela 20×256</td><td class="num">22M</td><td class="num">~2575</td></tr>
+      <tr><td class="wrap">Leela BT4 (transformer)</td><td class="num">~200M</td><td class="num">~2850</td></tr>
+    </table></div>
+    <div class="eq">Elo ≈ −694 + 433 · log₁₀(N<sub>params</sub>)</div>
+    <p>Solving for 3600 gives <strong>8.2 × 10⁹ parameters</strong>. Extrapolating this far past the anchors is <em>unsound</em> — the curve certainly flattens — so treat that figure as a <em>generous lower bound</em> on the requirement. The connectome offers <strong>2.7M</strong> weights at one-per-edge, or <strong>54.5M</strong> at one-per-synapse (§2.1). That is <strong>151× short</strong> at best, <strong>2,400× short</strong> at worst.</p>
+
+    <h3>Wall 2 — search</h3>
+    <p>Stockfish's 3600 is not a network property. It is a ~10⁸ nodes/sec alpha-beta search to depth 30+, with a 23–69M-parameter NNUE as the <em>leaf evaluator</em>. No policy network of any size currently reaches 3600 at one node; the best measured 1-node play is ~2850–2900. A policy network, however large, is ~700 Elo short <em>before capacity enters</em>. One fly-brain forward pass is, by construction, one node.</p>
+    <p>At the realistic ceiling of §2.4 (~1,850 Elo), the expected score against Stockfish-max is <strong>2.4 × 10⁻⁵</strong> — about one non-loss per 42,000 games.</p>
+
+    <h3>What this project is instead</h3>
+    <div class="note"><span class="hd">REFRAMED TARGET</span>Produce the first measured <b>capacity↔competence curve for a biological connectome held topologically fixed</b>, using chess as the complexity dial — and ship a fly that plays real, legal, non-trivial chess at <b>1,500–1,900 Elo</b>. The deliverable is the curve and the ablation set (§7). The Elo is the demo.</div>
+
+    <h3>The blackjack-dealer checkpoint</h3>
+    <p><strong>Verdict: keep the config, discard the weights. Net liability as an initialization.</strong></p>
+    <p>A blackjack dealer is a lookup table: ~20 reachable states (hard/soft totals 4–21) × 2 actions, gated by one rule — hit below 17. Total task entropy ≈ <strong>7 bits</strong>. Training 55M parameters to convergence on a 7-bit target does not leave the network warmed up; it drives it into a low-dimensional attractor with severe rank collapse and a large dormant-unit fraction. This is the loss-of-plasticity failure documented by Dohare et al. (2024, <em>Nature</em>): networks trained to convergence on a trivial task measurably lose the ability to learn a hard one. Fine-tuning from there, for a task needing ~10⁶× more entropy, is worse than a fresh init.</p>
+    <p><em>Falsifiable test, week 1.</em> Compute per-region effective rank (‖W‖<sub>F</sub>²/‖W‖₂²) and dormant fraction (&lt;0.1 Hz over 10k random inputs). If effective rank &lt; 5% of dimension or dormant fraction &gt; 30% in the central brain, the weights are confirmed dead.</p>
+    <p><em>What is reusable</em>, and worth ~30–50 GPU-hours: the neuron parameters already tuned to a stable non-saturating regime (that is Stage 0, already done); the I/O harness — sensory driver, spike-count decoder, CSR loader and its index layout; and the negative results on which surrogate-gradient scales explode. If you insist on warm-starting weights, use shrink-and-perturb (Ash &amp; Adams 2020) at λ=0.3, σ=0.01·std(W), budget one 20-GPU-hour A/B, and expect it to match a fresh init rather than beat it.</p>
+
+    <h2 id="s1"><span class="no">01</span> Substrate specification</h2>
+    <div class="tw"><table>
+      <tr><th>Choice</th><th class="wrap">Value</th></tr>
+      <tr><td>Neuron model</td><td class="wrap hit">Current-based LIF + adaptive threshold (ALIF) on a designated 20%</td></tr>
+      <tr><td>Timestep</td><td class="wrap hit">dt = 0.5 ms</td></tr>
+      <tr><td>Trial length</td><td class="wrap hit">T = 96 steps = 48 ms simulated</td></tr>
+      <tr><td>Simulator</td><td class="wrap hit">Custom JAX — lax.scan + custom-VJP spike op + Pallas SpMM</td></tr>
+      <tr><td>Precision</td><td class="wrap">bf16 activations, fp32 master weights</td></tr>
+      <tr><td>Dale's law</td><td class="wrap">Enforced by sign-constrained parametrization</td></tr>
+    </table></div>
+    <p>Baseline calibration from Shiu et al. 2024 / <code>philshiu/Drosophila_brain_model</code>: τ<sub>m</sub> = 20 ms, V<sub>rest</sub> = −52 mV, V<sub>θ</sub> = −45 mV, refractory 2.2 ms, τ<sub>syn</sub> = 5 ms, unitary weight 0.275 mV. Published values are the <em>start</em> of the Stage-0 search, not fixed points.</p>
+    <p><strong>Dale's law.</strong> <code>W_ij = s_i · softplus(a_ij)</code>, with <code>s_i = ±1</code> fixed by the FlyWire neurotransmitter prediction for the presynaptic neuron (Eckstein et al. 2024: ~48% ACh, ~22% GABA, ~22% Glu, ~4% monoamines). Only <code>a_ij</code> trains, so a neuron can never flip sign.</p>
+    <p><strong>Adaptation.</strong> 20% of central-brain neurons get an adaptive threshold, τ<sub>adapt</sub> log-uniform over 20 ms – 2 s (Bellec et al. 2018). Mean shortest path in FlyWire is ~2.8–3.5 hops, so computational depth must come from <em>time</em>, and pure LIF over 96 steps has a ~20 ms memory horizon. <strong>Declared relaxation:</strong> this adds one scalar dynamic variable per neuron. It adds no neurons and no connections.</p>
+
+    <h3>Fidelity ↔ trainability: three tiers, B chosen</h3>
+    <div class="tw"><table>
+      <tr><th>Tier</th><th class="wrap">Model</th><th class="wrap">Verdict</th></tr>
+      <tr><td>A</td><td class="wrap">Multi-compartment, conductance-based, receptor kinetics</td><td class="wrap">Rejected — ~50× cost, no stable gradients over 96 steps</td></tr>
+      <tr class="pick"><td>B</td><td class="wrap">Current-based LIF/ALIF, Dale-constrained, NT signs from FlyWire, dt = 0.5 ms</td><td class="wrap">CHOSEN — trainable by surrogate-grad BPTT</td></tr>
+      <tr><td>C</td><td class="wrap">Rate-based ReLU surrogate, same adjacency</td><td class="wrap">Stage-1 shadow + ablation control only</td></tr>
+    </table></div>
+    <p>Tier B keeps every property the <em>claim</em> depends on — real adjacency, real neurotransmitter signs, discrete spikes, biological time constants — and drops only what is unobservable at the readout. Tier C is used, but it is honestly <em>"a sparse RNN with a fly-shaped mask."</em> It is a pretraining device and a control, never the headline. Both numbers get reported.</p>
+    <p><strong>Why not Brian2 or NEST:</strong> neither differentiates. BPTT needs autodiff through the full 96-step unroll; Brian2 standalone and NEST give forward simulation only, and GeNN/Brian2CUDA give fast forward without gradients. Brian2 is retained as a <em>cross-validation oracle</em> — forward-simulate 1,000 trials in both, require max per-neuron spike-count divergence &lt; 2%.</p>
+    <div class="note"><span class="hd">KERNEL NOTE</span><code>jax.experimental.sparse.bcoo_dot_general</code> runs 5–20× off what a hand-written kernel achieves here. Budget <b>two engineer-weeks</b> for a Pallas/Triton SpMM over a static CSR under a neuropil-blocked permutation (~78 neuropils; most inter-neuropil blocks are empty, nonzero blocks run 10–20% dense).</div>
+
+    <h2 id="s2"><span class="no">02</span> Capacity analysis</h2>
+    <h3>2.1 What is actually trainable</h3>
+    <div class="tw"><table>
+      <tr><th class="wrap">Quantity</th><th>Count</th></tr>
+      <tr><td class="wrap">Neurons</td><td class="num">139,255</td></tr>
+      <tr><td class="wrap">Synapses</td><td class="num">~54.5M</td></tr>
+      <tr><td class="wrap">Neuron-to-neuron edges (≥5 syn)</td><td class="num">~2.7M</td></tr>
+      <tr><td class="wrap">Per-neuron params (τ<sub>m</sub>, τ<sub>syn</sub>, V<sub>θ</sub>, refrac, gain)</td><td class="num">~0.70M</td></tr>
+      <tr><td class="wrap">Neuromodulatory gains (6 NT × 78 neuropils)</td><td class="num">~470</td></tr>
+    </table></div>
+    <div class="note"><span class="hd">THE DECISION THAT MATTERS MOST</span>Edge weights vs. per-synapse weights. Both are strictly connectome-constrained — a synapse that exists in FlyWire is not an invented connection. Per-synapse buys a <b>20× capacity increase for free</b> and costs only ~3× wall-clock, because the sparse kernel is bandwidth-bound on <em>neuron state</em>, not synapse count, until ~10M nnz. <b>Take it.</b> Trainable parameter count: <b>≈ 55.2M</b>.</div>
+
+    <h3>2.2 Bits</h3>
+    <p>At the empirical ~2 bits/parameter capacity law (Allen-Zhu &amp; Li 2024) — <em>assumption: this transfers from language models to chess policies</em>:</p>
+    <div class="tw"><table>
+      <tr><th class="wrap">Configuration</th><th>Params</th><th>Capacity</th></tr>
+      <tr><td class="wrap">Edge weights only</td><td class="num">3.4M</td><td class="num">6.8 Mbit</td></tr>
+      <tr class="pick"><td class="wrap">Per-synapse (chosen)</td><td class="num">55.2M</td><td class="num">110 Mbit</td></tr>
+      <tr><td class="wrap">Required for 3600</td><td class="num">8.2B</td><td class="num">16.5 Gbit</td></tr>
+    </table></div>
+
+    <h3>2.3 Against known strong chess networks</h3>
+    <div class="tw"><table>
+      <tr><th class="wrap">Network</th><th>Params</th><th class="wrap">Strength</th></tr>
+      <tr><td class="wrap">Maia-1100 / 1900</td><td class="num">~1.2M</td><td class="wrap">1100 / 1900, human-matched</td></tr>
+      <tr><td class="wrap">ChessFly, edge weights</td><td class="num">3.4M</td><td class="wrap">—</td></tr>
+      <tr><td class="wrap">SF NNUE HalfKAv2_hm (L1=1024)</td><td class="num">~23M</td><td class="wrap">3600 <em>with</em> 10⁸ nps search</td></tr>
+      <tr class="pick"><td class="wrap">ChessFly, per-synapse</td><td class="num">55.2M</td><td class="wrap">target 1,500–1,900</td></tr>
+      <tr><td class="wrap">SF NNUE big net (L1=3072)</td><td class="num">~69M</td><td class="wrap">3600 <em>with</em> search</td></tr>
+      <tr><td class="wrap">Leela BT4</td><td class="num">~200M</td><td class="wrap">~2850 @ 1 node</td></tr>
+    </table></div>
+    <p>The comparison that matters: ChessFly sits <em>between the two Stockfish NNUE nets</em> in raw parameter count and will still be ~1,700 Elo weaker — because NNUE gets 10⁸ nodes/sec on top, and because NNUE's parameters sit in a topology designed for the task while ChessFly's sit wherever evolution put them.</p>
+
+    <h3>2.4 Realistic Elo ceiling</h3>
+    <p>Start from the fit at 55.2M params: <strong>2,656</strong>. Apply four penalties. <em>All four are engineering estimates with no direct literature support — flagged as assumptions.</em></p>
+    <div class="tw"><table>
+      <tr><th class="wrap">Penalty</th><th>Elo</th><th class="wrap">Reason</th></tr>
+      <tr><td class="wrap">No 8×8 translation equivariance</td><td class="num">−300</td><td class="wrap">No convolutional prior over the board</td></tr>
+      <tr><td class="wrap">Topology fixed, not optimizable</td><td class="num">−225</td><td class="wrap">Cannot allocate width where the task needs it</td></tr>
+      <tr><td class="wrap">Spike discretization + surrogate grad</td><td class="num">−150</td><td class="wrap">Typical SNN↔ANN gap of 2–6% task accuracy</td></tr>
+      <tr><td class="wrap">Dale's law sign constraint</td><td class="num">−75</td><td class="wrap">Small but nonzero per Cornford et al. 2021</td></tr>
+      <tr class="sum"><td class="wrap">Net ceiling</td><td class="num">≈1,905</td><td class="wrap">—</td></tr>
+    </table></div>
+    <div class="note"><span class="hd">STATED CEILING</span><b>1,500–1,900 Elo. Point estimate 1,750.</b> Floor if two or more penalties come in worse than estimated: <b>1,150</b>. Edge-weight-only variant, same arithmetic: <b>1,100–1,400</b>.</div>
+
+    <h3>2.5 What is <em>not</em> the bottleneck</h3>
+    <ul>
+      <li><strong>Output channel.</strong> ~1,300 descending neurons × ~2 bits/trial = 2.6 kbit; selecting among ~35 legal moves needs 5.1 bits. 500× overhead.</li>
+      <li><strong>Input channel.</strong> 768 retinotopic units × ~3 bits = 2.3 kbit against ~160 bits of board state.</li>
+      <li><strong>Compute.</strong> ~1,050 GPU-hours total. The 24 GB GPU is not the constraint.</li>
+      <li><strong>Depth.</strong> 96 timesteps of recurrence gives effective depth ~96, well past the ~20 layers strong chess nets use.</li>
+    </ul>
+    <p><strong>The bottleneck is weight entropy and fixed topology, and nothing else.</strong> That is a publishable finding on its own.</p>
+
+    <h2 id="s3"><span class="no">03</span> I/O encoding</h2>
+    <h3>3.1 Board → spikes</h3>
+    <p><strong>Piece placement → retinotopic visual pathway.</strong> Each optic lobe has ~800 medulla columns. Allocate 12 columns per square per eye: 64 × 12 = 768 columns, ~96% of one lobe. Column <em>k</em> of square <em>s</em> is driven iff piece type <em>k</em> occupies <em>s</em> (6 white + 6 black planes). This is exactly the standard 768-feature chess bitboard mapped onto the fly's <em>actual</em> retinotopy — the board is literally projected onto the eye.</p>
+    <ul>
+      <li>Rate code, Poisson, 80 Hz active / 2 Hz background, sustained across all 96 steps. The board is static within one decision, so rate is correct.</li>
+      <li>Plus a <strong>synchronous onset burst</strong> at t = 0–2 ms across active columns, giving the network a phase reference. <em>Assumption</em> that this materially speeds convergence — ablate in Stage 1 and report.</li>
+      <li>R1–R8 → lamina L1–L5 → medulla. Both lobes get the same board; bilateral redundancy is a feature (see the mirror test, §6.4).</li>
+    </ul>
+    <p><strong>Everything else → non-visual pathways.</strong> The antennal lobe has 51 glomeruli; 17 are allocated.</p>
+    <div class="tw"><table>
+      <tr><th class="wrap">State</th><th class="wrap">Pathway</th><th class="wrap">Encoding</th></tr>
+      <tr><td class="wrap">Side to move</td><td class="wrap">Ocellar L-neurons</td><td class="wrap">Global DC offset, 0 or 60 Hz</td></tr>
+      <tr><td class="wrap">Castling rights (4 bits)</td><td class="wrap">AL glomeruli DM1, DM2, DL5, VA1v</td><td class="wrap">70 Hz / 2 Hz per bit</td></tr>
+      <tr><td class="wrap">En passant file (8 + none)</td><td class="wrap">9 AL glomeruli</td><td class="wrap">1-hot, 70 Hz</td></tr>
+      <tr><td class="wrap">Repetition count (0/1/2)</td><td class="wrap">3 AL glomeruli</td><td class="wrap">Thermometer</td></tr>
+      <tr><td class="wrap">Halfmove clock (0–100 → 8 bins)</td><td class="wrap">Johnston's organ JO-A/B</td><td class="wrap">Rate, 5–75 Hz</td></tr>
+      <tr><td class="wrap">Fullmove number (4 log bins)</td><td class="wrap">JO-C</td><td class="wrap">Rate</td></tr>
+    </table></div>
+    <p>Splitting modalities forces convergence to happen in the central brain (LH, MB, SIP/SMP) rather than letting the network treat 785 undifferentiated input lines as one vector. <em>Assumption</em> — ablate against a flat all-inputs-to-medulla control.</p>
+    <p><strong>Timing.</strong> 96 steps × 0.5 ms = 48 ms, biologically motivated: fly looming-evoked escape runs on a 30–60 ms sensorimotor latency, so 48 ms is one fly decision. The readout window is the last 32 steps, after the onset transient has crossed the ~3-hop mean path length several times over.</p>
+
+    <h3>3.2 Spikes → move</h3>
+    <p><strong>Factored readout over descending neurons.</strong> ~1,300 DNs exist; a 1-hot over 1,968 UCI move encodings is impossible. Instead: 64 DN groups → <em>from-square</em> logits, 64 → <em>to-square</em>, 5 → <em>promotion piece</em>. 133 groups × 10 DNs = 1,330 DNs ≈ the full population.</p>
+    <div class="eq">logit(g) = spikes(g, last 32 steps) / 10&nbsp;&nbsp;·&nbsp;&nbsp;score(m) = logit_from[f] + logit_to[t] + logit_promo[p]</div>
+    <p>A second, separately-pooled ~40 DNs carry a scalar WDL value head over the same window.</p>
+
+    <h3>3.3 Illegal moves — and the honest accounting</h3>
+    <ol>
+      <li><strong>Training:</strong> mask illegal moves before the softmax, standard AlphaZero practice. The mask comes from <code>python-chess</code>, externally.</li>
+      <li><strong>Play:</strong> argmax over legal moves.</li>
+      <li><strong>Reporting:</strong> always publish the <strong>unmasked legal-move rate</strong> — the fraction of held-out positions where the argmax over all 4,672 encodings is legal with no mask. Target ≥ 95% by M4.</li>
+    </ol>
+    <div class="note"><span class="hd">DECLARED RELAXATION</span>The legality oracle is external and not learned. Learning legality from scratch would consume an estimated 30–40% of available weight entropy to encode rules known perfectly a priori, for an estimated −500 Elo; every strong engine does the same. The unmasked-rate metric exists so this relaxation cannot quietly inflate the claim that <em>the fly knows chess</em>.</div>
+
+    <h2 id="s4"><span class="no">04</span> Learning rule</h2>
+    <p><strong>Chosen: surrogate-gradient BPTT</strong>, full unroll over T = 96, gradient checkpointing every 12 steps. Surrogate: triangular (Bellec et al. 2018), <code>∂S/∂v ≈ γ·max(0, 1 − |v − V_θ|/V_θ)</code>, γ = 0.3, with fast-sigmoid (SuperSpike) as fallback. Zenke &amp; Vogels (2021) show results are robust to surrogate <em>shape</em> but sensitive to <em>scale</em>, so γ is swept in Stage 0 then frozen.</p>
+    <div class="tw"><table>
+      <tr><th class="wrap">Rejected</th><th class="wrap">Why</th></tr>
+      <tr><td class="wrap">e-prop</td><td class="wrap">O(1)-in-time memory and biologically plausible, but eligibility traces discard the non-local-in-time gradient, costing 10–30% on tasks with real temporal structure. T = 96 is short enough that full BPTT fits in 24 GB. <em>Held in reserve</em> if the memory budget breaks.</td></tr>
+      <tr><td class="wrap">Reward-modulated STDP</td><td class="wrap">Three-factor rules with a scalar global reward have gradient variance scaling with parameter count. At d = 55.2M the sample complexity is ~10⁴–10⁶× BPTT's. Dead on arrival.</td></tr>
+      <tr><td class="wrap">Evolution strategies</td><td class="wrap">Variance also scales with d: ~10⁴–10⁵ perturbations × ~10⁴ updates ≈ 10⁹ simulations ≈ 10⁵ GPU-hours. Dead <em>for the weights</em> — but retained for the ~470 neuromodulatory gains and a rank-16 per-neuropil modulation (~10⁴ params), tuned by CMA-ES as an outer loop. That is where ES is the right tool.</td></tr>
+    </table></div>
+
+    <h3>Credit assignment</h3>
+    <p>The key move is <strong>never requiring long-horizon credit assignment at all</strong> in Stages 0–3. One training example = one position → one move; the episode is 48 ms. Game-level credit arrives through the <em>target</em> (Stockfish's evaluation), not through a return propagated over 80 moves. Only Stage 4 does RL, with 1-step TD against a bootstrapped value head from a 32-simulation search — still no long horizon.</p>
+    <p>Within the 48 ms trial the risks are ordinary RNN pathologies: <strong>vanishing</strong>, mitigated by ALIF adaptation spanning 20 ms – 2 s and monitored as <code>‖∂L/∂h₀‖ / ‖∂L/∂h_T‖</code> (must stay in [10⁻³, 10³]); <strong>exploding</strong>, handled by global grad-norm clip at 1.0 and a Stage-0 constraint holding the linearized Jacobian's spectral radius at 0.95–1.05; and <strong>dead gradient from silence</strong>, handled by a firing-rate regularizer <code>λ_r·Σ(r_i − 5 Hz)²</code>, λ_r = 1e−3 — which is also what keeps the simulation biologically plausible.</p>
+    <p><strong>Rate→spike annealing.</strong> Train the Tier-C rate surrogate first, then anneal to spikes over 20k steps (quantization-clip-floor, Bu et al. 2022). This converts one very hard optimization problem into two easy ones. <em>Assumption:</em> the rate solution transfers with &lt; 15% loss in top-1 agreement; measured at M2, and if it fails the anneal schedule is the first thing to lengthen.</p>
+
+    <h2 id="s5"><span class="no">05</span> Training curriculum</h2>
+    <div class="note"><span class="hd">THROUGHPUT MODEL</span>RTX 4090, bf16, per-synapse weights, B = 512, T = 96, checkpoint every 12 steps: <b>≈1,900 positions/s → 6.9M positions/GPU-hour</b>. VRAM ≈ 6 GB at B=512, ≈10.5 GB at B=1024. Forward-only ~3× faster. H100 SXM ≈ 3.3× the 4090 here (HBM3 bandwidth-bound).</div>
+    <div class="tw"><table>
+      <tr><th>Stage</th><th class="wrap">What</th><th class="wrap">Data</th><th>Batch</th><th class="wrap">Stop criterion</th><th>GPU-h</th></tr>
+      <tr><td>0</td><td class="wrap">Substrate calibration, no chess</td><td class="wrap">10M random board patterns</td><td class="num">512</td><td class="wrap">≥95% neurons in 3–8 Hz; silent &lt;15%; saturated &lt;5%; spectral radius 0.95–1.05</td><td class="num">20</td></tr>
+      <tr><td>1</td><td class="wrap">Rate-surrogate distillation (Tier C)</td><td class="wrap">200M positions, Lichess + Leela T80; targets SF17 @ d12 MultiPV 20</td><td class="num">1024</td><td class="wrap">Held-out top-1 vs SF-d12 ≥ 35%</td><td class="num">40</td></tr>
+      <tr><td>1b</td><td class="wrap">ANN→SNN anneal</td><td class="wrap">40M positions</td><td class="num">512</td><td class="wrap">Spiking top-1 ≥ 0.85 × rate top-1</td><td class="num">25</td></tr>
+      <tr><td>2</td><td class="wrap">Spiking distillation, full BPTT</td><td class="wrap">Same 200M, 2 epochs</td><td class="num">512</td><td class="wrap">top-1 ≥ 33%; value MSE ≤ 0.09; unmasked legal ≥ 80%</td><td class="num">120</td></tr>
+      <tr><td>3</td><td class="wrap">Tactical puzzles</td><td class="wrap">Lichess puzzle DB ~5M, curriculum 400→2400</td><td class="num">512</td><td class="wrap">≥55% on the 1500–1800 band; ≥25% on 2000–2200</td><td class="num">70</td></tr>
+      <tr><td>4</td><td class="wrap">Self-play RL, 32-sim MCTS targets</td><td class="wrap">200k games × 15 iterations</td><td class="num">512</td><td class="wrap">+100 Elo over Stage-3 ckpt over 2,000 games, <em>or</em> 3 iterations gaining &lt;15 Elo</td><td class="num">400</td></tr>
+      <tr><td>5</td><td class="wrap">Endgame patch</td><td class="wrap">Syzygy 5-piece, 50M DTZ-labelled positions</td><td class="num">1024</td><td class="wrap">≥90% KRK/KQK/KPK; ≥70% KRP v KR</td><td class="num">50</td></tr>
+      <tr><td>—</td><td class="wrap">Eval gauntlets (12 × full)</td><td class="wrap">—</td><td class="num">—</td><td class="wrap">—</td><td class="num">25</td></tr>
+      <tr class="sum"><td>—</td><td class="wrap">Subtotal × 1.4 contingency</td><td class="wrap">—</td><td class="num">—</td><td class="wrap">—</td><td class="num">1,050</td></tr>
+    </table></div>
+    <div class="eq">1,050 4090-hours ≈ 320 H100-hours ≈ $640–$1,280 at $2–4/GPU-hour</div>
+    <p>The local 4090 at 20 h/day covers 1,050 hours in 53 days of pure compute across a 38-week schedule. <strong>Cloud burst is needed only to compress Stage 4</strong> — self-play generation parallelizes trivially; 8× H100 for ~2 days. Everything else runs on the workstation.</p>
+
+    <h3>Data sources</h3>
+    <ul>
+      <li><strong>Lichess open database</strong> — monthly PGN dumps, ~100M games/month. Train on 2023–2025; <strong>hold out everything after 2026-01-01</strong> as a temporal test set.</li>
+      <li><strong>Lichess elite database</strong> (2400+), ~9M games, for the Stage-4 opening distribution.</li>
+      <li><strong>Leela T80/T82 training data</strong> — positions with policy + WDL targets already attached, saving a re-run of Stockfish over 200M positions.</li>
+      <li><strong>Lichess puzzle database</strong> — ~5M puzzles, themed and rated.</li>
+      <li><strong>Syzygy tablebases</strong>, 5-piece (1 GB). 6-piece (150 GB) optional; 7-piece (18.4 TB) out of scope.</li>
+      <li><strong>Stockfish 17</strong> locally, depth 12 MultiPV 20, for anything uncovered — ~3,000 CPU-hours on cheap spot CPU, not the GPU.</li>
+    </ul>
+    <p><strong>Stage 4 is the one to cut if the schedule slips.</strong> Expected contribution +80 to +150 Elo for 38% of the compute budget. Stages 1–3 + 5 deliver ~85% of final strength.</p>
+
+    <h2 id="s6"><span class="no">06</span> Evaluation protocol</h2>
+    <p>Elo by <strong>gauntlet against absolutely-rated opponents</strong>, never self-play-relative. Ratings by <code>ordo</code> (or BayesElo) anchored to the CCRL scale; match play driven by <code>cutechess-cli</code> with ChessFly behind a UCI wrapper.</p>
+    <div class="tw"><table>
+      <tr><th class="wrap">Opponent</th><th class="wrap">Anchor</th><th class="wrap">Purpose</th></tr>
+      <tr><td class="wrap">SF17 UCI_Elo ∈ {1320, 1500, 1700, 1900, 2100}</td><td class="wrap">SF's own calibration</td><td class="wrap">Primary ladder</td></tr>
+      <tr><td class="wrap">Maia-1100 / 1500 / 1900</td><td class="wrap">Human-move-matched</td><td class="wrap">Human-relative calibration</td></tr>
+      <tr><td class="wrap">Fruit 2.1, Stash 25</td><td class="wrap">CCRL-rated</td><td class="wrap">Independent absolute anchor</td></tr>
+      <tr><td class="wrap">Lichess BOT account</td><td class="wrap">Real humans</td><td class="wrap">The only opponent that isn't a model of a human</td></tr>
+      <tr><td class="wrap">SF17, unlimited</td><td class="wrap">3600</td><td class="wrap">Run once, 20,000 games, to report the true expected score</td></tr>
+    </table></div>
+    <h3>6.3 Statistics</h3>
+    <ul>
+      <li><strong>2,000 games per opponent</strong> → ±25 Elo at 95% CI at typical draw rates. Full gauntlet = 8 opponents × 2,000 = <strong>16,000 games</strong>.</li>
+      <li><strong>SPRT</strong>, bounds [0, 10] Elo, α = β = 0.05, for checkpoint A/B during development — the Fishtest methodology. Typical stop 15k–40k games.</li>
+      <li><strong>Openings:</strong> 8-ply balanced book (UHO_Lichess_4852_v1.epd), every opening played from <em>both colours as a reverse pair</em> so opening bias cancels exactly.</li>
+      <li><strong>Time control:</strong> ChessFly's cost is fixed — one 96-step pass, ~0.5 ms on the 4090 — so the primary control is <em>fixed nodes</em> for the opponent (1k / 10k / 100k), with a secondary 60+0.6 wall-clock blitz set for realism. Report both.</li>
+    </ul>
+    <h3>6.4 Memorization vs. generalization</h3>
+    <p>Four independent probes. Memorization is the most likely way this project produces a number that is real and meaningless.</p>
+    <ol>
+      <li><strong>Temporal holdout.</strong> Split by <em>game</em> and by <em>date</em>; all eval games played after 2026-01-01. A train/test top-1 gap &gt; 8 points is a flag.</li>
+      <li><strong>Position-novelty stratification.</strong> Zobrist-hash every eval position against the training set; report Elo and top-1 separately for seen vs. unseen, and plies &lt;12 vs. ≥12. A &gt;150-Elo gap means the opening book is doing the work.</li>
+      <li><strong>Chess960 transfer.</strong> A generalizer loses 150–250 Elo on shuffled back ranks; a memorizer collapses. <strong>A drop &gt; 400 Elo means the model memorized opening theory rather than learning chess.</strong></li>
+      <li><strong>Bilateral mirror test.</strong> Evaluate left–right mirrored positions (castling disabled to keep them legal). The connectome is bilaterally symmetric and both optic lobes receive the same board, so a model that learned board <em>structure</em> should be near-invariant. <strong>&gt;100-Elo asymmetry means lateralized lookup, not spatial reasoning.</strong> This probe exists only because the substrate is a fly brain — it is free, and it is the sharpest test in the set.</li>
+    </ol>
+
+    <h2 id="s7"><span class="no">07</span> Failure modes and kill criteria</h2>
+    <p>Each is a measured number with a date. Hitting one means stop, not <em>try harder</em>.</p>
+    <div class="note kill"><span class="hd">KC-1 · CAPACITY WALL · M1, WEEK 6</span>Stage-1 <b>rate surrogate</b> (Tier C — no spikes, the easiest possible version) plateaus at held-out top-1 <b>&lt; 30%</b> with training loss still <b>&gt; 1.8 nats</b> after 3 epochs. Tier C is a plain sparse RNN, so failure here indicts the <em>topology</em>, not the spiking. → The connectome cannot represent a chess policy at all. <b>Kill, or relax the topology constraint and report that as the finding.</b></div>
+    <div class="note kill"><span class="hd">KC-2 · GRADIENT PATHOLOGY · M2, WEEK 10</span>Either <code>‖∂L/∂h₀‖ / ‖∂L/∂h_T‖</code> outside [10⁻³, 10³], or per-parameter gradient SNR <b>&lt; 0.02 for more than 60% of weights</b>. → BPTT is not reaching the recurrent core; the deep neuropils are being trained by noise. <b>Kill BPTT, spend one 100-GPU-hour e-prop attempt, then kill.</b></div>
+    <div class="note kill"><span class="hd">KC-3 · INFORMATION BOTTLENECK · M2, WEEK 10</span>Linear probe reconstructing piece placement from the narrowest population on the visual→central pathway scores <b>&lt; 85%</b> (≈ &lt;40 of ~160 board bits recovered) anywhere between medulla and central complex. → The board physically cannot reach the decision-making regions. <b>Kill.</b> This is the likeliest single point of failure: the fly's visual pathway is optimized for wide-field motion, not high-resolution static pattern.</div>
+    <div class="note kill"><span class="hd">KC-4 · ELO STALL · M6, WEEK 38</span><b>&lt; 1,200 Elo</b> (CCRL-anchored, 2,000 games, ±25) with all stages complete. → The §2.4 ceiling was optimistic by more than its own stated floor. <b>Ship as a demo, retract the Elo claim, publish the negative capacity result.</b></div>
+    <div class="note kill"><span class="hd">KC-5 · MOTOR DECODE DEGENERACY · M5, WEEK 30</span>Unmasked legal-move rate <b>&lt; 40%</b>. → 1,300 DNs cannot carry a factored move distribution; the masking relaxation is doing all the work. <b>Relax to an external legality head and say so in every subsequent claim.</b></div>
+    <div class="note kill"><span class="hd">KC-6 · CONNECTOME-IRRELEVANCE CONTROL · M4, WEEK 22</span>The adversarial control: train the identical pipeline on a <b>degree-preserving rewired</b> connectome (configuration model, same in/out degree sequence, shuffled targets). If the rewired network comes <b>within 50 Elo</b> of the real one, the biology contributed nothing and this is a paper about sparse RNNs. Not a kill — but it is the result, and it gets reported <em>first</em>, not buried.</div>
+
+    <h2 id="s8"><span class="no">08</span> Milestones</h2>
+    <p>Dated from 2026-09-12. Each has one measurable pass/fail.</p>
+    <div class="tw"><table>
+      <tr><th>ID</th><th>Date</th><th>Wk</th><th class="wrap">Deliverable</th><th class="wrap">Pass</th><th class="wrap">Fail →</th></tr>
+      <tr><td>M0</td><td>2026-09-26</td><td class="num">2</td><td class="wrap">Substrate runs</td><td class="wrap">139,255 neurons + 54.5M synapses loaded; 96-step forward at B=512 in &lt;300 ms; Brian2 cross-check &lt;2%; blackjack rank report filed</td><td class="wrap">Fix kernel</td></tr>
+      <tr><td>M1</td><td>2026-10-24</td><td class="num">6</td><td class="wrap">Rate surrogate (Tier C)</td><td class="wrap hit">Held-out SF-d12 top-1 ≥ 35%</td><td class="wrap">KC-1</td></tr>
+      <tr><td>M2</td><td>2026-11-21</td><td class="num">10</td><td class="wrap">Spiking net after anneal</td><td class="wrap hit">top-1 ≥ 30%; unmasked legal ≥ 60%; gradient ratio in band; probe ≥ 85%</td><td class="wrap">KC-2 / KC-3</td></tr>
+      <tr class="pick"><td>M3</td><td>2026-12-19</td><td class="num">14</td><td class="wrap">First rated play</td><td class="wrap hit">≥ 1,200 Elo vs SF@1320 + Maia-1100, 2,000 games, ±25</td><td class="wrap">Extend Stage 2</td></tr>
+      <tr class="pick"><td>M4</td><td>2027-02-13</td><td class="num">22</td><td class="wrap">Puzzles + rewire control</td><td class="wrap hit">Unmasked legal ≥ 95%; ≥ 1,500 Elo; rewired control ≥50 Elo weaker</td><td class="wrap">KC-6</td></tr>
+      <tr><td>M5</td><td>2027-04-10</td><td class="num">30</td><td class="wrap">Self-play complete</td><td class="wrap hit">≥ 1,700 Elo; Chess960 drop ≤ 350; mirror asymmetry ≤ 100</td><td class="wrap">KC-5</td></tr>
+      <tr class="pick"><td>M6</td><td>2027-06-05</td><td class="num">38</td><td class="wrap">Final</td><td class="wrap hit">≥ 1,800 target / ≥ 1,500 floor; 16,000-game gauntlet; 20,000-game SF-max run; capacity curve published</td><td class="wrap">KC-4</td></tr>
+      <tr><td>M7</td><td>2027-07-03</td><td class="num">42</td><td class="wrap"><em>Optional, separately named</em></td><td class="wrap">ChessFly as leaf eval in a 6-ply α–β: 2,200–2,500 Elo. <b>This is not the fly playing chess.</b></td><td class="wrap">—</td></tr>
+    </table></div>
+    <p class="lede" style="border-left-color:var(--cuticle); margin-top:34px">We will not beat Stockfish. We will build the first fly brain that plays real chess at club strength — and produce the first measured capacity↔competence curve for a biologically fixed connectome, plus a rewiring control that says whether the biology mattered at all.</p>
+
+    <h3>Assumptions register</h3>
+    <ol>
+      <li>The 2 bits/parameter capacity law transfers from language models to chess policies.</li>
+      <li>The three-point log-linear Elo↔params fit is valid across 1M–200M.</li>
+      <li>All four Elo penalties in §2.4 (−300 / −225 / −150 / −75) are engineering estimates with no direct literature support.</li>
+      <li>Rate→spike annealing transfers with &lt;15% top-1 loss.</li>
+      <li>The synchronous onset burst materially speeds convergence.</li>
+      <li>Splitting board state across sensory modalities beats a flat input map.</li>
+      <li>ALIF adaptation counts as tuning a time constant rather than adding state.</li>
+      <li>~1,300 DNs; ~800 medulla columns per eye; neuropil neuron counts throughout are approximate.</li>
+    </ol>
+
+    <div class="foot">
+      Substrate baseline: philshiu/Drosophila_brain_model — Shiu et al. 2024, <em>Nature</em>.<br>
+      Connectome: FlyWire FAFB v783 — Dorkenwald et al. 2024, <em>Nature</em>. Neurotransmitters: Eckstein et al. 2024.<br>
+      Genre prior art: nftechie/doomfly, nftechie/stonkfly. Both target policies under ~10 bits. Chess at 3600 is not one of those.
+    </div>
+  </article>
+</div>
+</section>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════
+   1 · CHESS ENGINE — 0x88, make/unmake, α–β + quiescence
+   ════════════════════════════════════════════════════════════════════ */
+const WHITE='w', BLACK='b';
+const isW = p => p>='A' && p<='Z';
+const isB = p => p>='a' && p<='z';
+const colorOf = p => isW(p) ? WHITE : BLACK;
+const onBoard = s => (s & 0x88) === 0;
+const rankOf = s => s >> 4, fileOf = s => s & 7;
+const sqName = s => "abcdefgh"[fileOf(s)] + (8 - rankOf(s));
+const nameSq = n => ("abcdefgh".indexOf(n[0])) + (8 - (+n[1])) * 16;
+
+const OFF = {
+  n:[-33,-31,-18,-14,14,18,31,33],
+  b:[-17,-15,15,17],
+  r:[-16,-1,1,16],
+  q:[-17,-16,-15,-1,1,15,16,17],
+  k:[-17,-16,-15,-1,1,15,16,17]
+};
+const SLIDE = {b:OFF.b, r:OFF.r, q:OFF.q};
+const C_WK=1, C_WQ=2, C_BK=4, C_BQ=8;
+
+function newState(){
+  const b = new Array(128).fill(0);
+  const back = ['r','n','b','q','k','b','n','r'];
+  for(let f=0; f<8; f++){
+    b[f] = back[f]; b[16+f] = 'p';
+    b[96+f] = 'P';  b[112+f] = back[f].toUpperCase();
+  }
+  return {b, turn:WHITE, castle:C_WK|C_WQ|C_BK|C_BQ, ep:-1, half:0, full:1,
+          k:{w:116, b:4}, hist:[]};
+}
+
+function attacked(st, sq, by){
+  const b = st.b;
+  // pawns
+  if(by === WHITE){
+    if(onBoard(sq+15) && b[sq+15] === 'P') return true;
+    if(onBoard(sq+17) && b[sq+17] === 'P') return true;
+  } else {
+    if(onBoard(sq-15) && b[sq-15] === 'p') return true;
+    if(onBoard(sq-17) && b[sq-17] === 'p') return true;
+  }
+  // knights + king
+  const N = by === WHITE ? 'N' : 'n', K = by === WHITE ? 'K' : 'k';
+  for(const o of OFF.n){ const t = sq+o; if(onBoard(t) && b[t] === N) return true; }
+  for(const o of OFF.k){ const t = sq+o; if(onBoard(t) && b[t] === K) return true; }
+  // sliders
+  const B = by===WHITE?'B':'b', R = by===WHITE?'R':'r', Q = by===WHITE?'Q':'q';
+  for(const o of OFF.b){
+    let t = sq+o;
+    while(onBoard(t)){ const p=b[t]; if(p){ if(p===B||p===Q) return true; break; } t+=o; }
+  }
+  for(const o of OFF.r){
+    let t = sq+o;
+    while(onBoard(t)){ const p=b[t]; if(p){ if(p===R||p===Q) return true; break; } t+=o; }
+  }
+  return false;
+}
+const inCheck = (st, c) => attacked(st, st.k[c], c === WHITE ? BLACK : WHITE);
+
+function pseudo(st){
+  const b = st.b, me = st.turn, out = [];
+  const mine = me === WHITE ? isW : isB, theirs = me === WHITE ? isB : isW;
+  for(let s = 0; s < 128; s++){
+    if(s & 0x88){ s += 7; continue; }
+    const p = b[s]; if(!p || !mine(p)) continue;
+    const t = p.toLowerCase();
+    if(t === 'p'){
+      const dir = me === WHITE ? -16 : 16;
+      const home = me === WHITE ? 6 : 1, last = me === WHITE ? 0 : 7;
+      const one = s + dir;
+      if(onBoard(one) && !b[one]){
+        if(rankOf(one) === last) for(const pr of ['q','r','b','n']) out.push({from:s,to:one,promo:me===WHITE?pr.toUpperCase():pr});
+        else out.push({from:s,to:one});
+        const two = s + dir*2;
+        if(rankOf(s) === home && !b[two]) out.push({from:s,to:two,flag:'dp'});
+      }
+      for(const d of [dir-1, dir+1]){
+        const c = s + d; if(!onBoard(c)) continue;
+        if(b[c] && theirs(b[c])){
+          if(rankOf(c) === last) for(const pr of ['q','r','b','n']) out.push({from:s,to:c,promo:me===WHITE?pr.toUpperCase():pr});
+          else out.push({from:s,to:c});
+        } else if(c === st.ep && !b[c]) out.push({from:s,to:c,flag:'ep'});
+      }
+    } else if(t === 'n' || t === 'k'){
+      for(const o of OFF[t]){
+        const c = s + o; if(!onBoard(c)) continue;
+        if(!b[c] || theirs(b[c])) out.push({from:s,to:c});
+      }
+    } else {
+      for(const o of SLIDE[t]){
+        let c = s + o;
+        while(onBoard(c)){
+          if(!b[c]) out.push({from:s,to:c});
+          else { if(theirs(b[c])) out.push({from:s,to:c}); break; }
+          c += o;
+        }
+      }
+    }
+  }
+  // castling
+  const them = me === WHITE ? BLACK : WHITE;
+  if(me === WHITE){
+    if((st.castle & C_WK) && !b[117] && !b[118] && !attacked(st,116,them) && !attacked(st,117,them) && !attacked(st,118,them))
+      out.push({from:116,to:118,flag:'ck'});
+    if((st.castle & C_WQ) && !b[115] && !b[114] && !b[113] && !attacked(st,116,them) && !attacked(st,115,them) && !attacked(st,114,them))
+      out.push({from:116,to:114,flag:'cq'});
+  } else {
+    if((st.castle & C_BK) && !b[5] && !b[6] && !attacked(st,4,them) && !attacked(st,5,them) && !attacked(st,6,them))
+      out.push({from:4,to:6,flag:'ck'});
+    if((st.castle & C_BQ) && !b[3] && !b[2] && !b[1] && !attacked(st,4,them) && !attacked(st,3,them) && !attacked(st,2,them))
+      out.push({from:4,to:2,flag:'cq'});
+  }
+  return out;
+}
+
+const CR_MASK = new Array(128).fill(15);
+CR_MASK[112] = 15 & ~C_WQ; CR_MASK[119] = 15 & ~C_WK; CR_MASK[116] = 15 & ~(C_WK|C_WQ);
+CR_MASK[0]   = 15 & ~C_BQ; CR_MASK[7]   = 15 & ~C_BK; CR_MASK[4]   = 15 & ~(C_BK|C_BQ);
+
+function makeMove(st, m){
+  const b = st.b;
+  const u = {cap:b[m.to], castle:st.castle, ep:st.ep, half:st.half, full:st.full,
+             kw:st.k.w, kb:st.k.b, epCap:0, epSq:-1, rf:-1, rt:-1};
+  const piece = b[m.from];
+  b[m.to] = m.promo || piece;
+  b[m.from] = 0;
+  if(m.flag === 'ep'){
+    const cs = m.to + (st.turn === WHITE ? 16 : -16);
+    u.epCap = b[cs]; u.epSq = cs; b[cs] = 0;
+  }
+  if(m.flag === 'ck'){ const rf = m.to+1, rt = m.to-1; b[rt] = b[rf]; b[rf] = 0; u.rf = rf; u.rt = rt; }
+  if(m.flag === 'cq'){ const rf = m.to-2, rt = m.to+1; b[rt] = b[rf]; b[rf] = 0; u.rf = rf; u.rt = rt; }
+  if(piece === 'K') st.k.w = m.to;
+  if(piece === 'k') st.k.b = m.to;
+  st.castle &= CR_MASK[m.from] & CR_MASK[m.to];
+  st.ep = m.flag === 'dp' ? (m.from + m.to) / 2 : -1;
+  st.half = (piece.toLowerCase() === 'p' || u.cap) ? 0 : st.half + 1;
+  if(st.turn === BLACK) st.full++;
+  st.turn = st.turn === WHITE ? BLACK : WHITE;
+  return u;
+}
+function unmakeMove(st, m, u){
+  const b = st.b;
+  st.turn = st.turn === WHITE ? BLACK : WHITE;
+  b[m.from] = m.promo ? (st.turn === WHITE ? 'P' : 'p') : b[m.to];
+  b[m.to] = u.cap;
+  if(u.epSq >= 0) b[u.epSq] = u.epCap;
+  if(u.rf >= 0){ b[u.rf] = b[u.rt]; b[u.rt] = 0; }
+  st.castle = u.castle; st.ep = u.ep; st.half = u.half; st.full = u.full;
+  st.k.w = u.kw; st.k.b = u.kb;
+}
+
+function legalMoves(st){
+  const out = [];
+  for(const m of pseudo(st)){
+    const u = makeMove(st, m);
+    const bad = inCheck(st, st.turn === WHITE ? BLACK : WHITE);
+    unmakeMove(st, m, u);
+    if(!bad) out.push(m);
+  }
+  return out;
+}
+
+/* ── evaluation ───────────────────────────────────────────────────── */
+const VAL = {p:100, n:320, b:330, r:500, q:900, k:20000};
+const PST = {
+  p:[0,0,0,0,0,0,0,0, 50,50,50,50,50,50,50,50, 10,10,20,30,30,20,10,10,
+     5,5,10,25,25,10,5,5, 0,0,0,20,20,0,0,0, 5,-5,-10,0,0,-10,-5,5,
+     5,10,10,-20,-20,10,10,5, 0,0,0,0,0,0,0,0],
+  n:[-50,-40,-30,-30,-30,-30,-40,-50, -40,-20,0,0,0,0,-20,-40, -30,0,10,15,15,10,0,-30,
+     -30,5,15,20,20,15,5,-30, -30,0,15,20,20,15,0,-30, -30,5,10,15,15,10,5,-30,
+     -40,-20,0,5,5,0,-20,-40, -50,-40,-30,-30,-30,-30,-40,-50],
+  b:[-20,-10,-10,-10,-10,-10,-10,-20, -10,0,0,0,0,0,0,-10, -10,0,5,10,10,5,0,-10,
+     -10,5,5,10,10,5,5,-10, -10,0,10,10,10,10,0,-10, -10,10,10,10,10,10,10,-10,
+     -10,5,0,0,0,0,5,-10, -20,-10,-10,-10,-10,-10,-10,-20],
+  r:[0,0,0,0,0,0,0,0, 5,10,10,10,10,10,10,5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5,
+     -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, -5,0,0,0,0,0,0,-5, 0,0,0,5,5,0,0,0],
+  q:[-20,-10,-10,-5,-5,-10,-10,-20, -10,0,0,0,0,0,0,-10, -10,0,5,5,5,5,0,-10,
+     -5,0,5,5,5,5,0,-5, 0,0,5,5,5,5,0,-5, -10,5,5,5,5,5,0,-10,
+     -10,0,5,0,0,0,0,-10, -20,-10,-10,-5,-5,-10,-10,-20],
+  k:[-30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
+     -30,-40,-40,-50,-50,-40,-40,-30, -30,-40,-40,-50,-50,-40,-40,-30,
+     -20,-30,-30,-40,-40,-30,-30,-20, -10,-20,-20,-20,-20,-20,-20,-10,
+     20,20,0,0,0,0,20,20, 20,30,10,0,0,10,30,20]
+};
+function evaluate(st){
+  const b = st.b; let sc = 0, wb = 0, bb = 0;
+  for(let s = 0; s < 128; s++){
+    if(s & 0x88){ s += 7; continue; }
+    const p = b[s]; if(!p) continue;
+    const t = p.toLowerCase(), i = rankOf(s) * 8 + fileOf(s);
+    const white = isW(p);
+    const v = VAL[t] + PST[t][white ? i : (7 - rankOf(s)) * 8 + fileOf(s)];
+    sc += white ? v : -v;
+    if(t === 'b'){ white ? wb++ : bb++; }
+  }
+  if(wb >= 2) sc += 30; if(bb >= 2) sc -= 30;
+  return st.turn === WHITE ? sc : -sc;
+}
+const MVV = m => m.cap ? (VAL[m.cap.toLowerCase()] * 10 - VAL[m.pc.toLowerCase()]) : 0;
+
+let NODES = 0;
+function quiesce(st, alpha, beta, d){
+  NODES++;
+  const stand = evaluate(st);
+  if(stand >= beta) return beta;
+  if(stand > alpha) alpha = stand;
+  if(d <= 0) return alpha;
+  const caps = [];
+  for(const m of pseudo(st)){
+    if(!st.b[m.to] && m.flag !== 'ep') continue;
+    m.cap = st.b[m.to] || 'p'; m.pc = st.b[m.from];
+    caps.push(m);
+  }
+  caps.sort((a, c) => MVV(c) - MVV(a));
+  for(const m of caps){
+    const u = makeMove(st, m);
+    if(inCheck(st, st.turn === WHITE ? BLACK : WHITE)){ unmakeMove(st, m, u); continue; }
+    const sc = -quiesce(st, -beta, -alpha, d - 1);
+    unmakeMove(st, m, u);
+    if(sc >= beta) return beta;
+    if(sc > alpha) alpha = sc;
+  }
+  return alpha;
+}
+function negamax(st, depth, alpha, beta){
+  if(depth === 0) return quiesce(st, alpha, beta, 4);
+  NODES++;
+  const ms = pseudo(st);
+  for(const m of ms){ m.cap = st.b[m.to]; m.pc = st.b[m.from]; }
+  ms.sort((a, c) => MVV(c) - MVV(a));
+  let any = false, best = -1e9;
+  for(const m of ms){
+    const u = makeMove(st, m);
+    if(inCheck(st, st.turn === WHITE ? BLACK : WHITE)){ unmakeMove(st, m, u); continue; }
+    any = true;
+    const sc = -negamax(st, depth - 1, -beta, -alpha);
+    unmakeMove(st, m, u);
+    if(sc > best) best = sc;
+    if(sc > alpha) alpha = sc;
+    if(alpha >= beta) return beta;
+  }
+  if(!any) return inCheck(st, st.turn) ? -30000 + (10 - depth) : 0;
+  return best;
+}
+function searchBest(st, depth){
+  NODES = 0;
+  const ms = legalMoves(st);
+  if(!ms.length) return null;
+  for(const m of ms){ m.cap = st.b[m.to]; m.pc = st.b[m.from]; }
+  ms.sort((a, c) => MVV(c) - MVV(a));
+  let best = null, bestSc = -1e9, alpha = -1e9;
+  const scored = [];
+  for(const m of ms){
+    const u = makeMove(st, m);
+    const sc = -negamax(st, depth - 1, -1e9, -alpha);
+    unmakeMove(st, m, u);
+    scored.push({m, sc});
+    if(sc > bestSc){ bestSc = sc; best = m; }
+    if(sc > alpha) alpha = sc;
+  }
+  // depth 1 ≈ M3: sample among near-best to model a noisy greedy readout
+  if(depth === 1){
+    const pool = scored.filter(x => x.sc >= bestSc - 45);
+    best = pool[(Math.random() * pool.length) | 0].m;
+    bestSc = scored.find(x => x.m === best).sc;
+  }
+  return {move:best, score:bestSc, nodes:NODES};
+}
+
+function moveSAN(st, m){
+  if(m.flag === 'ck') return 'O-O';
+  if(m.flag === 'cq') return 'O-O-O';
+  const p = st.b[m.from], t = p.toLowerCase();
+  const cap = st.b[m.to] || m.flag === 'ep';
+  let s = '';
+  if(t === 'p'){ if(cap) s += "abcdefgh"[fileOf(m.from)] + 'x'; }
+  else {
+    s += p.toUpperCase();
+    const amb = legalMoves(st).filter(x => x.to === m.to && x.from !== m.from &&
+                 st.b[x.from] && st.b[x.from].toLowerCase() === t);
+    if(amb.length){
+      s += (amb.some(x => fileOf(x.from) === fileOf(m.from)))
+         ? (8 - rankOf(m.from)) : "abcdefgh"[fileOf(m.from)];
+    }
+    if(cap) s += 'x';
+  }
+  s += sqName(m.to);
+  if(m.promo) s += '=' + m.promo.toUpperCase();
+  const u = makeMove(st, m);
+  const chk = inCheck(st, st.turn);
+  const mate = chk && legalMoves(st).length === 0;
+  unmakeMove(st, m, u);
+  s += mate ? '#' : (chk ? '+' : '');
+  return s;
+}
+function statusOf(st){
+  if(!legalMoves(st).length) return inCheck(st, st.turn) ? 'mate' : 'stale';
+  if(st.half >= 100) return 'fifty';
+  const b = st.b; let n = 0, heavy = false;
+  for(let s = 0; s < 128; s++){ if(s & 0x88){ s += 7; continue; }
+    const p = b[s]; if(!p) continue; n++;
+    const t = p.toLowerCase(); if(t === 'p' || t === 'r' || t === 'q') heavy = true; }
+  if(n <= 3 && !heavy) return 'material';
+  return 'ok';
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   2 · NEUROPIL LIF SURROGATE — 39 regions, 16 units each, T = 96
+   Counts are approximate FlyWire per-neuropil figures (see §8 note 8).
+   ════════════════════════════════════════════════════════════════════ */
+const RAW_REGIONS = [
+  ['LA',.055,.40,7500,'op'], ['ME',.145,.47,20000,'op'], ['LO',.225,.56,7000,'op'],
+  ['LOP',.205,.67,4000,'op'], ['PLP',.285,.63,1600,'v2'], ['PVLP',.335,.71,1700,'v2'],
+  ['AVLP',.385,.665,2400,'v2'], ['AL',.355,.815,1300,'ol'], ['LH',.295,.305,1600,'ol'],
+  ['MB',.335,.495,2600,'mb'], ['SLP',.405,.235,1400,'sp'], ['SMP',.452,.155,1700,'sp'],
+  ['SIP',.425,.345,900,'sp'], ['CRE',.435,.565,900,'cx'], ['BU',.445,.625,300,'cx'],
+  ['LAL',.405,.725,800,'pm']
+];
+const MID_REGIONS = [
+  ['PB',.50,.295,400,'cx'], ['FB',.50,.425,2200,'cx'], ['EB',.50,.525,700,'cx'],
+  ['NO',.50,.605,200,'cx'], ['GNG',.50,.865,3500,'pm'], ['DN',.50,.955,1300,'mo']
+];
+const REG = [];
+for(const [n,x,y,c,g] of RAW_REGIONS){
+  REG.push({id:n+'_L', lab:n, x, y, n:c, g});
+  REG.push({id:n+'_R', lab:n, x:1-x, y, n:c, g});
+}
+for(const [n,x,y,c,g] of MID_REGIONS) REG.push({id:n, lab:n, x, y, n:c, g});
+const RIX = {}; REG.forEach((r,i) => { RIX[r.id] = i; r.i = i; });
+
+const RAW_EDGES = [
+  ['LA','ME',1.0],['ME','LO',.85],['ME','LOP',.6],['LO','PLP',.7],['LO','PVLP',.6],
+  ['LO','AVLP',.45],['LOP','PLP',.5],['LOP','LAL',.55],['PLP','PVLP',.4],
+  ['PVLP','AVLP',.45],['AVLP','GNG',.5],['PLP','LAL',.4],['AL','MB',.8],['AL','LH',.75],
+  ['LH','SIP',.5],['LH','SLP',.55],['MB','CRE',.6],['MB','SMP',.5],['MB','SIP',.45],
+  ['SLP','SMP',.5],['SMP','SIP',.45],['SIP','CRE',.5],['CRE','LAL',.6],['CRE','FB',.4],
+  ['CRE','GNG',.35],['FB','LAL',.5],['EB','BU',.45],['BU','LAL',.55],['LAL','GNG',.7],
+  ['LAL','DN',.6],['GNG','DN',.9],['PB','FB',.6],['FB','EB',.55],['EB','NO',.4],
+  ['NO','FB',.35],['PB','EB',.4],['SMP','FB',.3],['LAL','PB',.3]
+];
+const EDGES = [];
+function addEdge(a, b, w){ if(RIX[a] !== undefined && RIX[b] !== undefined) EDGES.push({s:RIX[a], t:RIX[b], w}); }
+for(const [a,b,w] of RAW_EDGES){
+  const aL = RIX[a+'_L'] !== undefined, bL = RIX[b+'_L'] !== undefined;
+  if(aL && bL){ addEdge(a+'_L', b+'_L', w); addEdge(a+'_R', b+'_R', w); }
+  else if(aL && !bL){ addEdge(a+'_L', b, w * .8); addEdge(a+'_R', b, w * .8); }
+  else if(!aL && bL){ addEdge(a, b+'_L', w * .8); addEdge(a, b+'_R', w * .8); }
+  else addEdge(a, b, w);
+}
+addEdge('LAL_L','LAL_R',.3); addEdge('LAL_R','LAL_L',.3);
+addEdge('ME_L','LO_R',.12);  addEdge('ME_R','LO_L',.12);
+
+const T_STEPS = 96, U_PER = 16, N_UNITS = REG.length * U_PER;
+const INBOUND = REG.map(() => []);
+for(const e of EDGES) INBOUND[e.t].push(e);
+
+// per-unit fixed random projection of the 768-plane board onto ME units
+const PROJ = [];
+(function(){ let s = 20240611;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for(let u = 0; u < U_PER * 2; u++){
+    const picks = []; for(let k = 0; k < 42; k++) picks.push((rnd() * 768) | 0);
+    PROJ.push(picks);
+  }
+  for(const r of REG){ r.bias = .04 + rnd() * .05; r.off = []; for(let u = 0; u < U_PER; u++) r.off.push((rnd() - .5) * .5); }
+})();
+
+function encodeBoard(st){
+  const v = new Uint8Array(768);
+  const order = {P:0,N:1,B:2,R:3,Q:4,K:5,p:6,n:7,b:8,r:9,q:10,k:11};
+  for(let s = 0; s < 128; s++){
+    if(s & 0x88){ s += 7; continue; }
+    const p = st.b[s]; if(!p) continue;
+    v[(rankOf(s) * 8 + fileOf(s)) * 12 + order[p]] = 1;
+  }
+  const flags = [st.turn === WHITE ? 1 : 0, (st.castle & 1) ? 1 : 0, (st.castle & 2) ? 1 : 0,
+                 (st.castle & 4) ? 1 : 0, (st.castle & 8) ? 1 : 0, st.ep >= 0 ? 1 : 0,
+                 Math.min(1, st.half / 50)];
+  return {v, flags};
+}
+
+/** Run the surrogate. Returns raster + per-region rate trace + counters. */
+/** Run the surrogate: 39 neuropils x 16 units, T=96 @ dt=0.5 ms.
+    Returns per-region rate traces and a (t -> unit) spike raster. */
+function simulate(st){
+  const {v, flags} = encodeBoard(st);
+  const R = REG.length;
+  const rate = Array.from({length:R}, () => new Float32Array(T_STEPS));
+  const raster = Array.from({length:T_STEPS}, () => []);
+  const vm = new Float32Array(N_UNITS), refr = new Int8Array(N_UNITS);
+  let total = 0;
+  const meDrive = [];
+  for(let side = 0; side < 2; side++)
+    for(let u = 0; u < U_PER; u++){
+      let acc = 0; for(const p of PROJ[side * U_PER + u]) acc += v[p];
+      meDrive.push(.20 + acc / 14);
+    }
+  const alSignal = .30 + .50 * (flags[1] + flags[2] + flags[3] + flags[4]) / 4 + .22 * flags[5];
+  const drive = new Float32Array(R);
+  for(let r = 0; r < R; r++){
+    const lab = REG[r].lab;
+    drive[r] = REG[r].bias;
+    if(lab === 'LA') drive[r] += .90;
+    if(lab === 'AL') drive[r] += alSignal;
+    if(REG[r].g === 'sp') drive[r] += .10 * flags[6];
+    if(lab === 'PB') drive[r] += (.30 + .35 * flags[0]) * .4;
+  }
+  const TAU = .14, THR = 1.0, LEAK = 1 - TAU;
+  const prev = new Float32Array(R), cur = new Float32Array(R);
+  for(let t = 0; t < T_STEPS; t++){
+    for(let r = 0; r < R; r++){
+      let I = drive[r];
+      for(const e of INBOUND[r]) I += e.w * prev[e.s] * 2.5;
+      I += prev[r] * .30;
+      if(t < 4 && REG[r].lab === 'LA') I += 1.3;
+      const meBase = REG[r].lab === 'ME' ? (REG[r].id.endsWith('_L') ? 0 : U_PER) : -1;
+      let fired = 0;
+      for(let u = 0; u < U_PER; u++){
+        const gi = r * U_PER + u;
+        if(refr[gi] > 0){ refr[gi]--; continue; }
+        const extra = meBase >= 0 ? meDrive[meBase + u] * .85 : 0;
+        vm[gi] = vm[gi] * LEAK + (I + extra + REG[r].off[u] * .22 + (Math.random() - .5) * .20) * TAU;
+        if(vm[gi] >= THR){ vm[gi] = 0; refr[gi] = 4; fired++; raster[t].push(gi); total++; }
+      }
+      cur[r] = fired / U_PER;
+      rate[r][t] = cur[r];
+    }
+    prev.set(cur);
+  }
+  return {rate, raster, total};
+}
+
+/* DN readout — clamped to the played move (declared in the caveat bar). */
+function dnReadout(sim, move, legal){
+  const dnIdx = RIX['DN'];
+  let late = 0; for(let t = 64; t < T_STEPS; t++) late += sim.rate[dnIdx][t];
+  late = Math.max(.12, late / 32);
+  const from = new Float32Array(64), to = new Float32Array(64);
+  for(let i = 0; i < 64; i++){ from[i] = Math.random() * .16; to[i] = Math.random() * .16; }
+  for(const m of legal){
+    from[rankOf(m.from) * 8 + fileOf(m.from)] += .10 + Math.random() * .12;
+    to[rankOf(m.to) * 8 + fileOf(m.to)]       += .08 + Math.random() * .10;
+  }
+  if(move){
+    from[rankOf(move.from) * 8 + fileOf(move.from)] = .55 + late * .55;
+    to[rankOf(move.to) * 8 + fileOf(move.to)]       = .52 + late * .55;
+  }
+  const nrm = a => { const mx = Math.max(...a) || 1; return Array.from(a, x => x / mx); };
+  return {from:nrm(from), to:nrm(to), late};
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   3 · SCOPE RENDERING
+   ════════════════════════════════════════════════════════════════════ */
+const HEAT = [[0,[19,24,31]],[.30,[96,26,20]],[.55,[224,57,44]],[.80,[217,164,65]],[1,[255,244,224]]];
+function heat(a){
+  a = a < 0 ? 0 : a > 1 ? 1 : a;
+  for(let i = 1; i < HEAT.length; i++){
+    if(a <= HEAT[i][0]){
+      const [p0, c0] = HEAT[i-1], [p1, c1] = HEAT[i];
+      const f = (a - p0) / (p1 - p0);
+      return `rgb(${Math.round(c0[0]+(c1[0]-c0[0])*f)},${Math.round(c0[1]+(c1[1]-c0[1])*f)},${Math.round(c0[2]+(c1[2]-c0[2])*f)})`;
+    }
+  }
+  return 'rgb(255,244,224)';
+}
+function fitCanvas(cv, cssH){
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = cv.parentElement.clientWidth;
+  cv.style.height = cssH + 'px';
+  cv.width = Math.max(1, Math.round(w * dpr));
+  cv.height = Math.round(cssH * dpr);
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return {c, w, h:cssH};
+}
+
+const cGraph = document.getElementById('cGraph');
+const cRaster = document.getElementById('cRaster');
+const cDN = document.getElementById('cDN');
+
+function drawGraph(sim, upto){
+  const {c, w, h} = fitCanvas(cGraph, 190);
+  c.fillStyle = '#0A0D12'; c.fillRect(0, 0, w, h);
+  const px = r => 14 + r.x * (w - 28), py = r => 12 + r.y * (h - 24);
+  const act = REG.map((r, i) => {
+    if(!sim) return 0;
+    let a = 0, n = 0;
+    for(let t = Math.max(0, upto - 10); t <= upto; t++){ a += sim.rate[i][t]; n++; }
+    return Math.min(1, (a / Math.max(1, n)) * 1.9);
+  });
+  c.lineWidth = 1;
+  for(const e of EDGES){
+    const A = REG[e.s], B = REG[e.t];
+    const f = sim ? Math.min(1, act[e.s] * e.w * 1.5) : 0;
+    c.strokeStyle = f > .06 ? heat(.25 + f * .55) : '#222B36';
+    c.globalAlpha = f > .06 ? .30 + f * .55 : .5;
+    c.beginPath(); c.moveTo(px(A), py(A));
+    const mx = (px(A) + px(B)) / 2 + (A.y - B.y) * 10, my = (py(A) + py(B)) / 2;
+    c.quadraticCurveTo(mx, my, px(B), py(B)); c.stroke();
+  }
+  c.globalAlpha = 1;
+  for(let i = 0; i < REG.length; i++){
+    const r = REG[i], a = act[i];
+    const rad = 2.4 + Math.sqrt(r.n) / 34;
+    c.beginPath(); c.arc(px(r), py(r), rad + a * 2.4, 0, 6.2832);
+    c.fillStyle = heat(a); c.fill();
+    c.strokeStyle = a > .5 ? 'rgba(255,236,214,.5)' : '#2B3542'; c.stroke();
+  }
+  c.font = '600 7.5px "IBM Plex Mono", monospace';
+  c.fillStyle = '#5D6B7A'; c.textAlign = 'center';
+  for(const id of ['ME_L','ME_R','MB_L','MB_R','AL_L','AL_R','FB','EB','LAL_L','LAL_R','GNG','DN','LH_L','LH_R']){
+    const r = REG[RIX[id]];
+    c.fillStyle = act[r.i] > .45 ? '#D9A441' : '#5D6B7A';
+    c.fillText(r.lab, px(r), py(r) - 4.5 - Math.sqrt(r.n) / 34);
+  }
+  c.textAlign = 'left';
+}
+
+function drawRaster(sim, upto){
+  const {c, w, h} = fitCanvas(cRaster, 130);
+  c.fillStyle = '#0A0D12'; c.fillRect(0, 0, w, h);
+  const L = 30, plotW = w - L - 6, plotH = h - 14;
+  // region bands
+  for(let r = 0; r < REG.length; r += 2){
+    c.fillStyle = '#0E131A';
+    c.fillRect(L, 7 + (r / REG.length) * plotH, plotW, (2 / REG.length) * plotH);
+  }
+  c.font = '6.5px "IBM Plex Mono", monospace'; c.fillStyle = '#465260';
+  for(const id of ['LA_L','ME_L','LO_L','MB_L','AL_L','FB','GNG','DN']){
+    const r = REG[RIX[id]];
+    c.fillText(r.lab, 3, 7 + ((r.i + 1) / REG.length) * plotH);
+  }
+  if(sim){
+    for(let t = 0; t <= upto; t++){
+      const x = L + (t / T_STEPS) * plotW;
+      const age = 1 - Math.min(1, (upto - t) / 42);
+      for(const gi of sim.raster[t]){
+        const y = 7 + (gi / N_UNITS) * plotH;
+        c.fillStyle = heat(.42 + age * .42);
+        c.fillRect(x, y, 1.3, 1.3);
+      }
+    }
+    const cx = L + (upto / T_STEPS) * plotW;
+    c.strokeStyle = '#E0392C'; c.globalAlpha = .85; c.lineWidth = 1;
+    c.beginPath(); c.moveTo(cx, 4); c.lineTo(cx, h - 5); c.stroke(); c.globalAlpha = 1;
+  }
+  c.strokeStyle = '#2B3542'; c.strokeRect(L, 6.5, plotW, plotH + 1);
+  c.font = '6.5px "IBM Plex Mono", monospace'; c.fillStyle = '#465260';
+  c.fillText('0', L, h - 1); c.fillText('24', L + plotW * .5 - 5, h - 1); c.fillText('48 ms', L + plotW - 22, h - 1);
+}
+
+function drawDN(dn, reveal){
+  const {c, w, h} = fitCanvas(cDN, 92);
+  c.fillStyle = '#0A0D12'; c.fillRect(0, 0, w, h);
+  const L = 34, plotW = w - L - 8, rowH = 30;
+  c.font = '6.5px "IBM Plex Mono", monospace';
+  const rows = [['FROM', dn ? dn.from : null, 6], ['TO', dn ? dn.to : null, 6 + rowH + 14]];
+  for(const [lab, arr, y0] of rows){
+    c.fillStyle = '#465260'; c.fillText(lab, 3, y0 + 14);
+    c.strokeStyle = '#1C242E'; c.beginPath(); c.moveTo(L, y0 + rowH); c.lineTo(L + plotW, y0 + rowH); c.stroke();
+    if(!arr) continue;
+    let best = 0; for(let i = 1; i < 64; i++) if(arr[i] > arr[best]) best = i;
+    const bw = plotW / 64;
+    for(let i = 0; i < 64; i++){
+      const v = arr[i] * reveal;
+      const bh = Math.max(.6, v * rowH);
+      c.fillStyle = i === best ? '#E0392C' : heat(.45 + v * .35);
+      c.fillRect(L + i * bw + .4, y0 + rowH - bh, bw - .8, bh);
+    }
+    c.fillStyle = '#D9A441'; c.font = '600 7px "IBM Plex Mono", monospace';
+    c.fillText("abcdefgh"[best % 8] + (8 - ((best / 8) | 0)), L + best * bw - 3, y0 + rowH + 8);
+    c.font = '6.5px "IBM Plex Mono", monospace';
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   4 · 3D STAGE
+   ════════════════════════════════════════════════════════════════════ */
+const glCanvas = document.getElementById('gl');
+const renderer = new THREE.WebGLRenderer({canvas:glCanvas, antialias:true});
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+if(THREE.sRGBEncoding !== undefined) renderer.outputEncoding = THREE.sRGBEncoding;
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0B0E13);
+scene.fog = new THREE.Fog(0x0B0E13, 18, 34);
+const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+
+scene.add(new THREE.HemisphereLight(0x9FB4CC, 0x1A1410, 0.55));
+const key = new THREE.DirectionalLight(0xFFE7C4, 1.15);
+key.position.set(5.5, 11, 5.5); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -8; key.shadow.camera.right = 8;
+key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
+key.shadow.camera.near = 1; key.shadow.camera.far = 30; key.shadow.bias = -0.0012;
+scene.add(key);
+const fill = new THREE.DirectionalLight(0x7FA0C8, 0.42);
+fill.position.set(-6, 5, -4); scene.add(fill);
+const rim = new THREE.PointLight(0xE0392C, 0.5, 22);
+rim.position.set(0, 3.4, -7.5); scene.add(rim);
+
+const SQ = 1.0, HALF = SQ * 4;
+const boardGroup = new THREE.Group(); scene.add(boardGroup);
+
+const matLight = new THREE.MeshStandardMaterial({color:0xC7B287, roughness:.62, metalness:.05});
+const matDark  = new THREE.MeshStandardMaterial({color:0x36404D, roughness:.70, metalness:.06});
+const matFrame = new THREE.MeshStandardMaterial({color:0x1B222B, roughness:.55, metalness:.25});
+const matWhite = new THREE.MeshStandardMaterial({color:0xE6DED0, roughness:.42, metalness:.08});
+const matFly   = new THREE.MeshStandardMaterial({color:0x661610, roughness:.38, metalness:.16,
+                                                 emissive:0x1A0503, emissiveIntensity:.35});
+
+const squareMeshes = [];
+const sqGeo = new THREE.BoxGeometry(SQ, 0.16, SQ);
+for(let r = 0; r < 8; r++) for(let f = 0; f < 8; f++){
+  const m = new THREE.Mesh(sqGeo, (r + f) % 2 === 0 ? matLight : matDark);
+  m.position.set(f * SQ - HALF + SQ/2, -0.08, r * SQ - HALF + SQ/2);
+  m.receiveShadow = true;
+  m.userData.sq = r * 16 + f;
+  boardGroup.add(m); squareMeshes.push(m);
+}
+// engraved frame: 9.6 wide, top face 0.005 BELOW the square tops so only the
+// 0.8-unit border band is visible and nothing z-fights with the playing surface.
+(function(){
+  const FR = 9.6, PX = 512, pad = PX * (FR - 8) / 2 / FR, sqp = PX * 8 / FR / 8;
+  const cv = document.createElement('canvas'); cv.width = PX; cv.height = PX;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#1B222B'; c.fillRect(0, 0, PX, PX);
+  c.fillStyle = '#7C8B9B'; c.font = '600 21px "IBM Plex Mono", monospace';
+  c.textAlign = 'center'; c.textBaseline = 'middle';
+  for(let i = 0; i < 8; i++){
+    const p = pad + (i + .5) * sqp;
+    c.fillText("abcdefgh"[i], p, pad / 2);
+    c.fillText("abcdefgh"[i], p, PX - pad / 2);
+    c.fillText(String(8 - i), pad / 2, p);
+    c.fillText(String(8 - i), PX - pad / 2, p);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  const top = new THREE.MeshStandardMaterial({map:tex, roughness:.66, metalness:.18});
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(FR, .26, FR),
+    [matFrame, matFrame, top, matFrame, matFrame, matFrame]);
+  frame.position.y = -0.135;          // top face at y = -0.005
+  frame.receiveShadow = true; boardGroup.add(frame);
+})();
+
+/* ── piece geometry (lathe profiles + detail solids) ──────────────── */
+function lathe(pts, seg = 28){
+  return new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg);
+}
+const PROFILE = {
+  p:[[0,0],[.30,0],[.30,.05],[.26,.09],[.17,.15],[.125,.27],[.118,.40],[.15,.45],[.215,.49],[.215,.53],[.16,.56],[.115,.58],[0,.58]],
+  r:[[0,0],[.33,0],[.33,.055],[.28,.10],[.20,.17],[.185,.56],[.205,.63],[.285,.67],[.285,.86],[.215,.86],[0,.86]],
+  n:[[0,0],[.33,0],[.33,.055],[.28,.10],[.20,.17],[.175,.40],[.185,.46],[0,.46]],
+  b:[[0,0],[.31,0],[.31,.055],[.26,.10],[.185,.17],[.135,.34],[.165,.40],[.225,.44],[.225,.48],[.15,.52],[.13,.58],[.165,.70],[.185,.83],[.14,.94],[.072,1.02],[0,1.04]],
+  q:[[0,0],[.345,0],[.345,.055],[.295,.11],[.21,.19],[.155,.40],[.143,.60],[.175,.66],[.25,.72],[.275,.78],[.30,.88],[.25,.94],[.18,.96],[0,.96]],
+  k:[[0,0],[.345,0],[.345,.055],[.295,.11],[.21,.19],[.155,.42],[.143,.64],[.175,.70],[.25,.76],[.28,.84],[.30,.94],[.25,1.00],[.195,1.02],[0,1.02]]
+};
+function buildPiece(type, mat, facing){
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(lathe(PROFILE[type]), mat);
+  body.castShadow = true; body.receiveShadow = true; g.add(body);
+  const add = (geo, x, y, z, rx = 0, ry = 0) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x, y, z); m.rotation.x = rx; m.rotation.y = ry;
+    m.castShadow = true; g.add(m); return m;
+  };
+  if(type === 'p') add(new THREE.SphereGeometry(.155, 20, 14), 0, .695, 0);
+  if(type === 'r'){
+    for(let i = 0; i < 6; i++){
+      const a = i / 6 * Math.PI * 2;
+      add(new THREE.BoxGeometry(.105, .15, .105), Math.cos(a) * .225, .925, Math.sin(a) * .225, 0, -a);
+    }
+  }
+  if(type === 'n'){
+    const d = facing;                                   // +1 faces -Z, -1 faces +Z
+    add(new THREE.BoxGeometry(.21, .42, .28), 0, .64, -.02 * d, -.22 * d);
+    add(new THREE.BoxGeometry(.19, .16, .28), 0, .76, -.21 * d, .30 * d);
+    add(new THREE.BoxGeometry(.17, .11, .15), 0, .68, -.32 * d, .10 * d);
+    add(new THREE.BoxGeometry(.095, .21, .13), 0, .87, .10 * d, -.35 * d);
+    add(new THREE.ConeGeometry(.045, .12, 8), .065, .90, -.02 * d);
+    add(new THREE.ConeGeometry(.045, .12, 8), -.065, .90, -.02 * d);
+  }
+  if(type === 'b'){
+    add(new THREE.SphereGeometry(.068, 16, 12), 0, 1.09, 0);
+    add(new THREE.BoxGeometry(.032, .20, .26), 0, .87, 0, 0, 0);
+  }
+  if(type === 'q'){
+    for(let i = 0; i < 9; i++){
+      const a = i / 9 * Math.PI * 2;
+      add(new THREE.SphereGeometry(.055, 12, 10), Math.cos(a) * .25, 1.02, Math.sin(a) * .25);
+    }
+    add(new THREE.SphereGeometry(.072, 16, 12), 0, 1.075, 0);
+  }
+  if(type === 'k'){
+    add(new THREE.BoxGeometry(.065, .30, .065), 0, 1.17, 0);
+    add(new THREE.BoxGeometry(.21, .065, .065), 0, 1.19, 0);
+  }
+  g.scale.set(.92, 1.22, .92);   // chess pieces run ~2.5x taller than wide
+  return g;
+}
+const pieceCache = {};
+function pieceFor(char){
+  const type = char.toLowerCase(), white = isW(char);
+  const k = char;
+  if(!pieceCache[k]) pieceCache[k] = () => buildPiece(type, white ? matWhite : matFly, white ? 1 : -1);
+  return pieceCache[k]();
+}
+
+const pieceGroup = new THREE.Group(); scene.add(pieceGroup);
+const markGroup = new THREE.Group(); scene.add(markGroup);
+const sqToWorld = s => new THREE.Vector3(fileOf(s) * SQ - HALF + SQ/2, 0, rankOf(s) * SQ - HALF + SQ/2);
+
+let pieceObjs = new Map();               // square -> Object3D
+function rebuildPieces(st){
+  pieceGroup.clear(); pieceObjs = new Map();
+  for(let s = 0; s < 128; s++){
+    if(s & 0x88){ s += 7; continue; }
+    const p = st.b[s]; if(!p) continue;
+    const o = pieceFor(p);
+    o.position.copy(sqToWorld(s));
+    pieceGroup.add(o); pieceObjs.set(s, o);
+  }
+}
+
+const ringGeo = new THREE.RingGeometry(.30, .40, 28);
+const discGeo = new THREE.CircleGeometry(.15, 20);
+const matMark = new THREE.MeshBasicMaterial({color:0xD9A441, transparent:true, opacity:.72, side:THREE.DoubleSide});
+const matMarkCap = new THREE.MeshBasicMaterial({color:0xE0392C, transparent:true, opacity:.8, side:THREE.DoubleSide});
+const matSel = new THREE.MeshBasicMaterial({color:0xD9A441, transparent:true, opacity:.34, side:THREE.DoubleSide});
+const selGeo = new THREE.PlaneGeometry(SQ * .96, SQ * .96);
+function showMarks(sel, moves){
+  markGroup.clear();
+  if(sel === null) return;
+  const s = new THREE.Mesh(selGeo, matSel);
+  s.rotation.x = -Math.PI / 2; s.position.copy(sqToWorld(sel)); s.position.y = .012;
+  markGroup.add(s);
+  for(const m of moves){
+    const cap = !!state.b[m.to] || m.flag === 'ep';
+    const mk = new THREE.Mesh(cap ? ringGeo : discGeo, cap ? matMarkCap : matMark);
+    mk.rotation.x = -Math.PI / 2; mk.position.copy(sqToWorld(m.to)); mk.position.y = .013;
+    markGroup.add(mk);
+  }
+}
+let lastMarks = null;
+function showLast(m){
+  if(lastMarks){ scene.remove(lastMarks); lastMarks = null; }
+  if(!m) return;
+  lastMarks = new THREE.Group();
+  for(const sq of [m.from, m.to]){
+    const p = new THREE.Mesh(selGeo, new THREE.MeshBasicMaterial({color:0x7A1D15, transparent:true, opacity:.42, side:THREE.DoubleSide}));
+    p.rotation.x = -Math.PI / 2; p.position.copy(sqToWorld(sq)); p.position.y = .008;
+    lastMarks.add(p);
+  }
+  scene.add(lastMarks);
+}
+
+/* ── orbit ────────────────────────────────────────────────────────── */
+const orbit = {az:0, pol:0.80, dist:13.6, tAz:0, tPol:0.80, tDist:13.6};
+let flipped = false;
+function applyCam(){
+  const az = orbit.az + (flipped ? Math.PI : 0);
+  camera.position.set(
+    Math.sin(az) * Math.cos(orbit.pol) * orbit.dist,
+    Math.sin(orbit.pol) * orbit.dist,
+    Math.cos(az) * Math.cos(orbit.pol) * orbit.dist
+  );
+  camera.lookAt(0, .35, 0);
+}
+let drag = null;
+glCanvas.addEventListener('pointerdown', e => {
+  drag = {x:e.clientX, y:e.clientY, az:orbit.tAz, pol:orbit.tPol, moved:0};
+  glCanvas.setPointerCapture(e.pointerId);
+});
+glCanvas.addEventListener('pointermove', e => {
+  if(!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.moved = Math.max(drag.moved, Math.abs(dx) + Math.abs(dy));
+  orbit.tAz = drag.az - dx * .007 * (flipped ? -1 : 1);
+  orbit.tPol = Math.min(1.40, Math.max(0.22, drag.pol + dy * .006));
+});
+glCanvas.addEventListener('pointerup', e => {
+  if(drag && drag.moved < 6) pick(e);
+  drag = null;
+});
+glCanvas.addEventListener('pointercancel', () => { drag = null; });
+glCanvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  orbit.tDist = Math.min(22, Math.max(8.0, orbit.tDist + e.deltaY * .012));
+}, {passive:false});
+
+function resize(){
+  const w = glCanvas.parentElement.clientWidth, h = glCanvas.parentElement.clientHeight;
+  if(!w || !h) return;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', () => { resize(); redrawScope(); });
+
+/* ══════════════════════════════════════════════════════════════════════
+   5 · GAME LOOP
+   ════════════════════════════════════════════════════════════════════ */
+let state = newState();
+let selected = null, selMoves = [], depth = 2, busy = false, over = false;
+let history = [];                                  // {san, color}
+let anim = null, lastSim = null, lastDN = null, playT = T_STEPS - 1, playing = false;
+
+const $ = id => document.getElementById(id);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function redrawScope(){
+  drawGraph(lastSim, playT);
+  drawRaster(lastSim, playT);
+  drawDN(lastDN, playing ? Math.min(1, Math.max(0, (playT - 56) / 30)) : (lastDN ? 1 : 0));
+}
+function setReadout(){
+  $('rT').textContent = (playT * 0.5).toFixed(1);
+  if(lastSim){
+    let s = 0; for(let t = 0; t <= playT; t++) s += lastSim.raster[t].length;
+    $('rSp').textContent = s.toLocaleString();
+    const win = Math.max(1, Math.min(20, playT + 1));
+    let f = 0; for(let t = playT - win + 1; t <= playT; t++) if(t >= 0) f += lastSim.raster[t].length;
+    $('rHz').textContent = ((f / win) / N_UNITS / 0.0005).toFixed(0);
+  } else { $('rSp').textContent = '0'; $('rHz').textContent = '0.0'; }
+}
+
+function renderLog(){
+  const el = $('log');
+  $('plyCount').textContent = history.length + ' ply';
+  if(!history.length){ el.innerHTML = '<div class="empty">No moves yet.</div>'; return; }
+  let html = '<ol>';
+  for(let i = 0; i < history.length; i += 2){
+    html += `<li><span class="n">${(i/2)+1}.</span><span>${history[i] ? history[i].san : ''}</span>` +
+            `<span class="f">${history[i+1] ? history[i+1].san : ''}</span></li>`;
+  }
+  el.innerHTML = html + '</ol>';
+  el.scrollTop = el.scrollHeight;
+}
+function setVerdict(txt, cls){
+  const v = $('verdict'); v.textContent = txt; v.className = 'grow' + (cls ? ' ' + cls : '');
+}
+function refreshEval(){
+  const s = evaluate(state) * (state.turn === WHITE ? 1 : -1) / 100;
+  $('evalTxt').textContent = 'eval ' + (s >= 0 ? '+' : '') + s.toFixed(2);
+}
+
+function checkEnd(){
+  const st = statusOf(state);
+  if(st === 'ok') return false;
+  over = true;
+  if(st === 'mate'){
+    const loserIsYou = state.turn === WHITE;
+    setVerdict(loserIsYou ? 'Checkmate — the fly wins.' : 'Checkmate — you win.', loserIsYou ? 'lose' : 'win');
+  } else if(st === 'stale') setVerdict('Stalemate — draw.');
+  else if(st === 'fifty') setVerdict('Draw — fifty-move rule.');
+  else setVerdict('Draw — insufficient material.');
+  return true;
+}
+
+function pick(e){
+  if(busy || over || state.turn !== WHITE) return;
+  const rect = glCanvas.getBoundingClientRect();
+  const v = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
+                              -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(v, camera);
+  const hits = ray.intersectObjects(squareMeshes, false);
+  if(!hits.length) return;
+  const sq = hits[0].object.userData.sq;
+  if(selected !== null){
+    const mv = selMoves.filter(m => m.to === sq);
+    if(mv.length){
+      const m = mv.find(x => x.promo === 'Q') || mv[0];
+      playMove(m, true);
+      return;
+    }
+  }
+  const p = state.b[sq];
+  if(p && isW(p)){
+    selected = sq;
+    selMoves = legalMoves(state).filter(m => m.from === sq);
+    showMarks(selected, selMoves);
+  } else { selected = null; selMoves = []; showMarks(null, []); }
+}
+
+function animateMove(m, done){
+  const obj = pieceObjs.get(m.from);
+  if(!obj){ done(); return; }
+  const a = sqToWorld(m.from), b = sqToWorld(m.to);
+  const hop = state.b[m.from] && state.b[m.from].toLowerCase() === 'n' ? .75 : .18;
+  if(reduceMotion){ done(); return; }
+  anim = {obj, a, b, hop, t:0, dur:270, done};
+}
+
+function playMove(m, byHuman){
+  const san = moveSAN(state, m);
+  makeMove(state, m);
+  history.push({san, color:byHuman ? 'w' : 'b'});
+  selected = null; selMoves = []; showMarks(null, []);
+  busy = true;
+  animateMove(m, () => {
+    rebuildPieces(state);
+    showLast(m);
+    renderLog(); refreshEval();
+    busy = false;
+    if(checkEnd()) return;
+    if(!byHuman){ setVerdict('White to move — click a piece.'); return; }
+    flyTurn();
+  });
+  if(reduceMotion){
+    rebuildPieces(state); showLast(m); renderLog(); refreshEval(); busy = false;
+    if(checkEnd()) return;
+    if(!byHuman) setVerdict('White to move — click a piece.'); else flyTurn();
+  }
+}
+
+function flyTurn(){
+  if(over) return;
+  busy = true;
+  setVerdict('Fly thinking — 96 timesteps, 48 ms simulated…');
+  $('scopeState').textContent = 'running';
+  const legal = legalMoves(state);
+  lastSim = simulate(state);
+  const res = searchBest(state, depth);
+  lastDN = dnReadout(lastSim, res ? res.move : null, legal);
+  playT = 0; playing = true;
+  const t0 = performance.now();
+  const dur = reduceMotion ? 0 : 1150;
+  (function step(){
+    const e = reduceMotion ? 1 : Math.min(1, (performance.now() - t0) / dur);
+    playT = Math.round(e * (T_STEPS - 1));
+    redrawScope(); setReadout();
+    if(e < 1){ requestAnimationFrame(step); return; }
+    playing = false;
+    $('scopeState').textContent = 'settled';
+    $('rDn').textContent = res ? sqName(res.move.from) + '→' + sqName(res.move.to) : '—';
+    redrawScope();
+    if(!res){ busy = false; checkEnd(); return; }
+    busy = false;
+    playMove(res.move, false);
+  })();
+}
+
+/* ── controls ─────────────────────────────────────────────────────── */
+$('ladder').addEventListener('click', e => {
+  const b = e.target.closest('.lvl'); if(!b || b.disabled) return;
+  [...$('ladder').children].forEach(x => x.setAttribute('aria-pressed', 'false'));
+  b.setAttribute('aria-pressed', 'true');
+  depth = +b.dataset.d;
+});
+$('bNew').addEventListener('click', () => reset());
+$('bFlip').addEventListener('click', () => { flipped = !flipped; });
+$('bUndo').addEventListener('click', () => {
+  if(busy || history.length < 2) return;
+  // replay from the start, minus the last full move pair
+  const saved = history.slice(0, history.length - 2);
+  state = newState(); history = []; over = false;
+  for(const h of saved){
+    const m = legalMoves(state).find(x => moveSAN(state, x) === h.san);
+    if(!m) break;
+    makeMove(state, m); history.push(h);
+  }
+  rebuildPieces(state); showLast(null); renderLog(); refreshEval();
+  setVerdict('White to move — click a piece.');
+  selected = null; showMarks(null, []);
+});
+
+/* The scope must never open empty — run one resting trial so the panels show
+   real dynamics for the position currently on the board. */
+function restingScope(){
+  lastSim = simulate(state);
+  lastDN = dnReadout(lastSim, null, legalMoves(state));
+  playT = T_STEPS - 1; playing = false;
+  $('scopeState').textContent = 'resting';
+  $('rDn').textContent = '—';
+  redrawScope(); setReadout();
+}
+
+function reset(){
+  state = newState(); history = []; over = false; busy = false;
+  selected = null; selMoves = []; lastSim = null; lastDN = null; playT = T_STEPS - 1;
+  rebuildPieces(state); showMarks(null, []); showLast(null);
+  renderLog(); refreshEval(); restingScope();
+  setVerdict('White to move — click a piece.');
+}
+
+/* tabs */
+function setView(play){
+  $('vPlay').classList.toggle('on', play);
+  $('vPlan').classList.toggle('on', !play);
+  $('tabPlay').setAttribute('aria-pressed', String(play));
+  $('tabPlan').setAttribute('aria-pressed', String(!play));
+  if(play) requestAnimationFrame(() => { resize(); redrawScope(); });
+  else window.scrollTo(0, 0);
+}
+$('tabPlay').addEventListener('click', () => setView(true));
+$('tabPlan').addEventListener('click', () => setView(false));
+
+/* ── main loop ────────────────────────────────────────────────────── */
+function tick(){
+  requestAnimationFrame(tick);
+  orbit.az += (orbit.tAz - orbit.az) * .16;
+  orbit.pol += (orbit.tPol - orbit.pol) * .16;
+  orbit.dist += (orbit.tDist - orbit.dist) * .12;
+  applyCam();
+  if(anim){
+    anim.t += 16.7;
+    const e = Math.min(1, anim.t / anim.dur), s = e < .5 ? 2*e*e : 1 - 2*(1-e)*(1-e);
+    anim.obj.position.lerpVectors(anim.a, anim.b, s);
+    anim.obj.position.y = Math.sin(s * Math.PI) * anim.hop;
+    if(e >= 1){ const d = anim.done; anim = null; d(); }
+  }
+  renderer.render(scene, camera);
+}
+
+/* boot */
+function start(snap){
+  resize();
+  if(snap && snap.history && snap.history.length){
+    state = newState(); history = [];
+    for(const h of snap.history){
+      const m = legalMoves(state).find(x => moveSAN(state, x) === h.san);
+      if(!m) break;
+      makeMove(state, m); history.push(h);
+    }
+    if(typeof snap.depth === 'number'){
+      depth = snap.depth;
+      [...$('ladder').children].forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.d === depth)));
+    }
+  }
+  rebuildPieces(state); renderLog(); refreshEval(); restingScope();
+  checkEnd() || setVerdict('White to move — click a piece.');
+  tick();
+}
+if(window.claude && window.claude.hot){
+  window.claude.hot.snapshot(() => ({history, depth}));
+  window.claude.hot.ready ? window.claude.hot.ready(start) : start(window.claude.hot.data || {});
+} else start({});
+</script>
