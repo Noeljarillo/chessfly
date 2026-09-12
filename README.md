@@ -34,6 +34,9 @@ Self-contained demo — no build step, open it directly.
   legs around the piece, carries it, sets it down and leaves
 - Deliberation playback is independent of `prefers-reduced-motion`: reduced
   motion steps the trial instead of sweeping it, and never skips it
+- Responsive down to 320px, portrait and landscape: the camera solves its own
+  framing against the board corners, so the whole board fits any aspect;
+  one finger orbits, two pinch to zoom
 
 The opponent ladder is the §8 milestone table: M3 ≈ 1200, M4 ≈ 1500, M6 ≈ 1800.
 Stockfish-max is listed and disabled, annotated with its capacity shortfall.
